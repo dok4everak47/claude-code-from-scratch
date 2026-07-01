@@ -2,59 +2,76 @@
 
 import * as readline from "readline";
 import { Agent } from "./agent.js";
-import { printWelcome, printUserPrompt, printError, printInfo, printPlanForApproval, printPlanApprovalOptions } from "./ui.js";
+import {
+    printWelcome,
+    printUserPrompt,
+    printError,
+    printInfo,
+    printPlanForApproval,
+    printPlanApprovalOptions,
+} from "./ui.js";
 import { loadSession, getLatestSessionId } from "./session.js";
 import { listMemories } from "./memory.js";
-import { discoverSkills, resolveSkillPrompt, getSkillByName, executeSkill } from "./skills.js";
+import {
+    discoverSkills,
+    resolveSkillPrompt,
+    getSkillByName,
+    executeSkill,
+} from "./skills.js";
 import type { PermissionMode } from "./tools.js";
+import "dotenv/config";
 
 interface ParsedArgs {
-  permissionMode: PermissionMode;
-  model: string;
-  apiBase?: string;
-  prompt?: string;
-  resume?: boolean;
-  thinking?: boolean;
-  maxCost?: number;
-  maxTurns?: number;
+    permissionMode: PermissionMode;
+    model: string;
+    apiBase?: string;
+    prompt?: string;
+    resume?: boolean;
+    thinking?: boolean;
+    quiet?: boolean;
+    maxCost?: number;
+    maxTurns?: number;
 }
 
 function parseArgs(): ParsedArgs {
-  const args = process.argv.slice(2);
-  let permissionMode: PermissionMode = "default";
-  let thinking = false;
-  let model = process.env.MINI_CLAUDE_MODEL || "claude-opus-4-6";
-  let apiBase: string | undefined;
-  let resume = false;
-  let maxCost: number | undefined;
-  let maxTurns: number | undefined;
-  const positional: string[] = [];
+    const args = process.argv.slice(2);
+    let permissionMode: PermissionMode = "default";
+    let thinking = false;
+    let model = process.env.MINI_CLAUDE_MODEL || "claude-opus-4-6";
+    let apiBase: string | undefined;
+    let resume = false;
+    let maxCost: number | undefined;
+    let maxTurns: number | undefined;
+    let quiet = false;
+    const positional: string[] = [];
 
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--yolo" || args[i] === "-y") {
-      permissionMode = "bypassPermissions";
-    } else if (args[i] === "--plan") {
-      permissionMode = "plan";
-    } else if (args[i] === "--accept-edits") {
-      permissionMode = "acceptEdits";
-    } else if (args[i] === "--dont-ask") {
-      permissionMode = "dontAsk";
-    } else if (args[i] === "--thinking") {
-      thinking = true;
-    } else if (args[i] === "--model" || args[i] === "-m") {
-      model = args[++i] || model;
-    } else if (args[i] === "--api-base") {
-      apiBase = args[++i];
-    } else if (args[i] === "--resume") {
-      resume = true;
-    } else if (args[i] === "--max-cost") {
-      const v = parseFloat(args[++i]);
-      if (!isNaN(v)) maxCost = v;
-    } else if (args[i] === "--max-turns") {
-      const v = parseInt(args[++i], 10);
-      if (!isNaN(v)) maxTurns = v;
-    } else if (args[i] === "--help" || args[i] === "-h") {
-      console.log(`
+    for (let i = 0; i < args.length; i++) {
+        if (args[i] === "--yolo" || args[i] === "-y") {
+            permissionMode = "bypassPermissions";
+        } else if (args[i] === "--plan") {
+            permissionMode = "plan";
+        } else if (args[i] === "--accept-edits") {
+            permissionMode = "acceptEdits";
+        } else if (args[i] === "--dont-ask") {
+            permissionMode = "dontAsk";
+        } else if (args[i] === "--thinking") {
+            thinking = true;
+        } else if (args[i] === "--quiet") {
+            quiet = true;
+        } else if (args[i] === "--model" || args[i] === "-m") {
+            model = args[++i] || model;
+        } else if (args[i] === "--api-base") {
+            apiBase = args[++i];
+        } else if (args[i] === "--resume") {
+            resume = true;
+        } else if (args[i] === "--max-cost") {
+            const v = parseFloat(args[++i]);
+            if (!isNaN(v)) maxCost = v;
+        } else if (args[i] === "--max-turns") {
+            const v = parseInt(args[++i], 10);
+            if (!isNaN(v)) maxTurns = v;
+        } else if (args[i] === "--help" || args[i] === "-h") {
+            console.log(`
 Usage: mini-claude [options] [prompt]
 
 Options:
@@ -89,283 +106,345 @@ Examples:
   mini-claude --resume
   mini-claude  # starts interactive REPL
 `);
-      process.exit(0);
-    } else {
-      positional.push(args[i]);
+            process.exit(0);
+        } else {
+            positional.push(args[i]);
+        }
     }
-  }
 
-  return {
-    permissionMode,
-    model,
-    apiBase,
-    resume,
-    thinking,
-    maxCost,
-    maxTurns,
-    prompt: positional.length > 0 ? positional.join(" ") : undefined,
-  };
+    return {
+        permissionMode,
+        model,
+        apiBase,
+        resume,
+        thinking,
+        maxCost,
+        maxTurns,
+        prompt: positional.length > 0 ? positional.join(" ") : undefined,
+    };
 }
 
 async function runRepl(agent: Agent) {
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-
-  // Provide confirmFn that reuses this readline instance, avoiding the
-  // classic Node.js bug where a second readline on the same stdin kills
-  // the first one when closed.
-  agent.setConfirmFn((_message: string) => {
-    return new Promise((resolve) => {
-      rl.question("  Allow? (y/n): ", (answer) => {
-        resolve(answer.toLowerCase().startsWith("y"));
-      });
+    const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
     });
-  });
 
-  // Plan approval callback: interactive multi-option selection
-  agent.setPlanApprovalFn((planContent: string) => {
-    return new Promise((resolve) => {
-      printPlanForApproval(planContent);
-      printPlanApprovalOptions();
-
-      const askChoice = () => {
-        rl.question("  Enter choice (1-4): ", (answer) => {
-          const choice = answer.trim();
-          if (choice === "1") {
-            resolve({ choice: "clear-and-execute" });
-          } else if (choice === "2") {
-            resolve({ choice: "execute" });
-          } else if (choice === "3") {
-            resolve({ choice: "manual-execute" });
-          } else if (choice === "4") {
-            rl.question("  Feedback (what to change): ", (feedback) => {
-              resolve({ choice: "keep-planning", feedback: feedback.trim() || undefined });
+    // Provide confirmFn that reuses this readline instance, avoiding the
+    // classic Node.js bug where a second readline on the same stdin kills
+    // the first one when closed.
+    agent.setConfirmFn((_message: string) => {
+        return new Promise((resolve) => {
+            rl.question("  Allow? (y/n): ", (answer) => {
+                resolve(answer.toLowerCase().startsWith("y"));
             });
-          } else {
-            console.log("  Invalid choice. Enter 1, 2, 3, or 4.");
-            askChoice();
-          }
         });
-      };
-      askChoice();
     });
-  });
 
-  // Ctrl+C handling
-  let sigintCount = 0;
-  process.on("SIGINT", () => {
-    if (agent.isProcessing) {
-      agent.abort();
-      console.log("\n  (interrupted)");
-      sigintCount = 0;
-      printUserPrompt();
-    } else {
-      sigintCount++;
-      if (sigintCount >= 2) {
-        console.log("\nBye!\n");
-        process.exit(0);
-      }
-      console.log("\n  Press Ctrl+C again to exit.");
-      printUserPrompt();
-    }
-  });
+    // Plan approval callback: interactive multi-option selection
+    agent.setPlanApprovalFn((planContent: string) => {
+        return new Promise((resolve) => {
+            printPlanForApproval(planContent);
+            printPlanApprovalOptions();
 
-  printWelcome();
-
-  const askQuestion = (): void => {
-    printUserPrompt();
-    rl.once("line", async (line) => {
-      const input = line.trim();
-      sigintCount = 0;
-
-      if (!input) {
-        askQuestion();
-        return;
-      }
-      if (input === "exit" || input === "quit") {
-        console.log("\nBye!\n");
-        rl.close();
-        process.exit(0);
-      }
-
-      // REPL commands
-      if (input === "/clear") {
-        agent.clearHistory();
-        askQuestion();
-        return;
-      }
-      if (input === "/plan") {
-        const newMode = agent.togglePlanMode();
-        askQuestion();
-        return;
-      }
-      if (input === "/cost") {
-        agent.showCost();
-        askQuestion();
-        return;
-      }
-      if (input === "/compact") {
-        try {
-          await agent.compact();
-        } catch (e: any) {
-          printError(e.message);
-        }
-        askQuestion();
-        return;
-      }
-      if (input === "/memory") {
-        const memories = listMemories();
-        if (memories.length === 0) {
-          printInfo("No memories saved yet.");
-        } else {
-          printInfo(`${memories.length} memories:`);
-          for (const m of memories) {
-            console.log(`    [${m.type}] ${m.name} — ${m.description}`);
-          }
-        }
-        askQuestion();
-        return;
-      }
-      if (input === "/skills") {
-        const skills = discoverSkills();
-        if (skills.length === 0) {
-          printInfo("No skills found. Add skills to .claude/skills/<name>/SKILL.md");
-        } else {
-          printInfo(`${skills.length} skills:`);
-          for (const s of skills) {
-            const tag = s.userInvocable ? `/${s.name}` : s.name;
-            console.log(`    ${tag} (${s.source}) — ${s.description}`);
-          }
-        }
-        askQuestion();
-        return;
-      }
-
-      // Skill invocation: /<skill-name> [args]
-      if (input.startsWith("/")) {
-        const spaceIdx = input.indexOf(" ");
-        const cmdName = spaceIdx > 0 ? input.slice(1, spaceIdx) : input.slice(1);
-        const cmdArgs = spaceIdx > 0 ? input.slice(spaceIdx + 1) : "";
-        const skill = getSkillByName(cmdName);
-        if (skill && skill.userInvocable) {
-          printInfo(`Invoking skill: ${skill.name}`);
-          try {
-            if (skill.context === "fork") {
-              // Fork mode: use skill tool which creates a sub-agent
-              const forkResult = executeSkill(skill.name, cmdArgs);
-              if (forkResult) {
-                await agent.chat(`Use the skill tool to invoke "${skill.name}" with args: ${cmdArgs || "(none)"}`);
-              }
-            } else {
-              // Inline mode: inject resolved prompt
-              const resolved = resolveSkillPrompt(skill, cmdArgs);
-              await agent.chat(resolved);
-            }
-          } catch (e: any) {
-            if (e.name !== "AbortError" && !e.message?.includes("aborted")) {
-              printError(e.message);
-            }
-          }
-          askQuestion();
-          return;
-        }
-        // Unknown command — treat as regular input
-      }
-
-      try {
-        await agent.chat(input);
-      } catch (e: any) {
-        if (e.name === "AbortError" || e.message?.includes("aborted")) {
-          // Already handled by SIGINT handler
-        } else {
-          printError(e.message);
-        }
-      }
-
-      askQuestion();
+            const askChoice = () => {
+                rl.question("  Enter choice (1-4): ", (answer) => {
+                    const choice = answer.trim();
+                    if (choice === "1") {
+                        resolve({ choice: "clear-and-execute" });
+                    } else if (choice === "2") {
+                        resolve({ choice: "execute" });
+                    } else if (choice === "3") {
+                        resolve({ choice: "manual-execute" });
+                    } else if (choice === "4") {
+                        rl.question(
+                            "  Feedback (what to change): ",
+                            (feedback) => {
+                                resolve({
+                                    choice: "keep-planning",
+                                    feedback: feedback.trim() || undefined,
+                                });
+                            },
+                        );
+                    } else {
+                        console.log("  Invalid choice. Enter 1, 2, 3, or 4.");
+                        askChoice();
+                    }
+                });
+            };
+            askChoice();
+        });
     });
-  };
 
-  askQuestion();
+    // Ctrl+C handling
+    let sigintCount = 0;
+    process.on("SIGINT", () => {
+        if (agent.isProcessing) {
+            agent.abort();
+            console.log("\n  (interrupted)");
+            sigintCount = 0;
+            printUserPrompt();
+        } else {
+            sigintCount++;
+            if (sigintCount >= 2) {
+                console.log("\nBye!\n");
+                process.exit(0);
+            }
+            console.log("\n  Press Ctrl+C again to exit.");
+            printUserPrompt();
+        }
+    });
+
+    const askQuestion = (): void => {
+        printUserPrompt();
+        rl.once("line", async (line) => {
+            const input = line.trim();
+            sigintCount = 0;
+
+            if (!input) {
+                askQuestion();
+                return;
+            }
+            if (input === "exit" || input === "quit") {
+                console.log("\nBye!\n");
+                rl.close();
+                process.exit(0);
+            }
+
+            // REPL commands
+            if (input === "/clear") {
+                agent.clearHistory();
+                askQuestion();
+                return;
+            }
+            if (input === "/hello") {
+                console.log(" 你好! ");
+                askQuestion();
+                return;
+            }
+            if (input === "/time") {
+                console.log(" " + new Date().toLocaleString("zh-CN"));
+                askQuestion();
+                return;
+            }
+            if (input === "/plan") {
+                const newMode = agent.togglePlanMode();
+                askQuestion();
+                return;
+            }
+            if (input === "/cost") {
+                agent.showCost();
+                askQuestion();
+                return;
+            }
+            if (input === "/compact") {
+                try {
+                    await agent.compact();
+                } catch (e: any) {
+                    printError(e.message);
+                }
+                askQuestion();
+                return;
+            }
+            if (input === "/memory") {
+                const memories = listMemories();
+                if (memories.length === 0) {
+                    printInfo("No memories saved yet.");
+                } else {
+                    printInfo(`${memories.length} memories:`);
+                    for (const m of memories) {
+                        console.log(
+                            `    [${m.type}] ${m.name} — ${m.description}`,
+                        );
+                    }
+                }
+                askQuestion();
+                return;
+            }
+            if (input === "/skills") {
+                const skills = discoverSkills();
+                if (skills.length === 0) {
+                    printInfo(
+                        "No skills found. Add skills to .claude/skills/<name>/SKILL.md",
+                    );
+                } else {
+                    printInfo(`${skills.length} skills:`);
+                    for (const s of skills) {
+                        const tag = s.userInvocable ? `/${s.name}` : s.name;
+                        console.log(
+                            `    ${tag} (${s.source}) — ${s.description}`,
+                        );
+                    }
+                }
+                askQuestion();
+                return;
+            }
+
+            if (input.startsWith("/weather")) {
+                const city = input.slice(9).trim() || "玉林";
+                try {
+                    const res = await fetch(
+                        "https://wttr.in/" +
+                            encodeURIComponent(city) +
+                            "?format=3",
+                    );
+                    const text = await res.text();
+                    console.log("  " + text.trim());
+                } catch (e: any) {
+                    console.log("  获取天气失败");
+                }
+                askQuestion();
+                return;
+            }
+
+            // Skill invocation: /<skill-name> [args]
+            if (input.startsWith("/")) {
+                const spaceIdx = input.indexOf(" ");
+                const cmdName =
+                    spaceIdx > 0 ? input.slice(1, spaceIdx) : input.slice(1);
+                const cmdArgs = spaceIdx > 0 ? input.slice(spaceIdx + 1) : "";
+                const skill = getSkillByName(cmdName);
+                if (skill && skill.userInvocable) {
+                    printInfo(`Invoking skill: ${skill.name}`);
+                    try {
+                        if (skill.context === "fork") {
+                            // Fork mode: use skill tool which creates a sub-agent
+                            const forkResult = executeSkill(
+                                skill.name,
+                                cmdArgs,
+                            );
+                            if (forkResult) {
+                                await agent.chat(
+                                    `Use the skill tool to invoke "${skill.name}" with args: ${cmdArgs || "(none)"}`,
+                                );
+                            }
+                        } else {
+                            // Inline mode: inject resolved prompt
+                            const resolved = resolveSkillPrompt(skill, cmdArgs);
+                            await agent.chat(resolved);
+                        }
+                    } catch (e: any) {
+                        if (
+                            e.name !== "AbortError" &&
+                            !e.message?.includes("aborted")
+                        ) {
+                            printError(e.message);
+                        }
+                    }
+                    askQuestion();
+                    return;
+                }
+                // Unknown command — treat as regular input
+            }
+
+            try {
+                await agent.chat(input);
+            } catch (e: any) {
+                if (e.name === "AbortError" || e.message?.includes("aborted")) {
+                    // Already handled by SIGINT handler
+                } else {
+                    printError(e.message);
+                }
+            }
+
+            askQuestion();
+        });
+    };
+
+    askQuestion();
 }
 
 async function main() {
-  const { permissionMode, model, apiBase, prompt, resume, thinking, maxCost, maxTurns } = parseArgs();
+    const {
+        permissionMode,
+        model,
+        apiBase,
+        prompt,
+        resume,
+        thinking,
+        quiet,
+        maxCost,
+        maxTurns,
+    } = parseArgs();
 
-  // Resolve API config from env vars (API keys only via env, not CLI)
-  let resolvedApiBase = apiBase;
-  let resolvedApiKey: string | undefined;
-  let resolvedUseOpenAI = !!apiBase;
+    // Resolve API config from env vars (API keys only via env, not CLI)
+    let resolvedApiBase = apiBase;
+    let resolvedApiKey: string | undefined;
+    let resolvedUseOpenAI = !!apiBase;
 
-  // Check OPENAI env vars first (if OPENAI_BASE_URL is set, use OpenAI format)
-  if (process.env.OPENAI_API_KEY && process.env.OPENAI_BASE_URL) {
-    resolvedApiKey = process.env.OPENAI_API_KEY;
-    resolvedApiBase = resolvedApiBase || process.env.OPENAI_BASE_URL;
-    resolvedUseOpenAI = true;
-  } else if (process.env.ANTHROPIC_API_KEY) {
-    resolvedApiKey = process.env.ANTHROPIC_API_KEY;
-    resolvedApiBase = resolvedApiBase || process.env.ANTHROPIC_BASE_URL;
-    resolvedUseOpenAI = false;
-  } else if (process.env.OPENAI_API_KEY) {
-    resolvedApiKey = process.env.OPENAI_API_KEY;
-    resolvedApiBase = resolvedApiBase || process.env.OPENAI_BASE_URL;
-    resolvedUseOpenAI = true;
-  }
+    // Check OPENAI env vars first (if OPENAI_BASE_URL is set, use OpenAI format)
+    if (process.env.OPENAI_API_KEY && process.env.OPENAI_BASE_URL) {
+        resolvedApiKey = process.env.OPENAI_API_KEY;
+        resolvedApiBase = resolvedApiBase || process.env.OPENAI_BASE_URL;
+        resolvedUseOpenAI = true;
+    } else if (process.env.ANTHROPIC_API_KEY) {
+        resolvedApiKey = process.env.ANTHROPIC_API_KEY;
+        resolvedApiBase = resolvedApiBase || process.env.ANTHROPIC_BASE_URL;
+        resolvedUseOpenAI = false;
+    } else if (process.env.OPENAI_API_KEY) {
+        resolvedApiKey = process.env.OPENAI_API_KEY;
+        resolvedApiBase = resolvedApiBase || process.env.OPENAI_BASE_URL;
+        resolvedUseOpenAI = true;
+    }
 
-  // --api-base without env key: check if any key is available
-  if (!resolvedApiKey && apiBase) {
-    resolvedApiKey = process.env.OPENAI_API_KEY || process.env.ANTHROPIC_API_KEY;
-    resolvedUseOpenAI = true;
-  }
+    // --api-base without env key: check if any key is available
+    if (!resolvedApiKey && apiBase) {
+        resolvedApiKey =
+            process.env.OPENAI_API_KEY || process.env.ANTHROPIC_API_KEY;
+        resolvedUseOpenAI = true;
+    }
 
-  if (!resolvedApiKey) {
-    printError(
-      `API key is required.\n` +
-        `  Set ANTHROPIC_API_KEY (+ optional ANTHROPIC_BASE_URL) for Anthropic format,\n` +
-        `  or OPENAI_API_KEY + OPENAI_BASE_URL for OpenAI-compatible format.`
-    );
-    process.exit(1);
-  }
+    if (!resolvedApiKey) {
+        printError(
+            `API key is required.\n` +
+                `  Set ANTHROPIC_API_KEY (+ optional ANTHROPIC_BASE_URL) for Anthropic format,\n` +
+                `  or OPENAI_API_KEY + OPENAI_BASE_URL for OpenAI-compatible format.`,
+        );
+        process.exit(1);
+    }
 
-  const agent = new Agent({
-    permissionMode, model, thinking, maxCostUsd: maxCost, maxTurns,
-    apiBase: resolvedUseOpenAI ? resolvedApiBase : undefined,
-    anthropicBaseURL: !resolvedUseOpenAI ? resolvedApiBase : undefined,
-    apiKey: resolvedApiKey,
-  });
+    const agent = new Agent({
+        permissionMode,
+        model,
+        thinking,
+        maxCostUsd: maxCost,
+        maxTurns,
+        apiBase: resolvedUseOpenAI ? resolvedApiBase : undefined,
+        anthropicBaseURL: !resolvedUseOpenAI ? resolvedApiBase : undefined,
+        apiKey: resolvedApiKey,
+    });
 
-  // Resume session if requested
-  if (resume) {
-    const sessionId = getLatestSessionId();
-    if (sessionId) {
-      const session = loadSession(sessionId);
-      if (session) {
-        agent.restoreSession({
-          anthropicMessages: session.anthropicMessages,
-          openaiMessages: session.openaiMessages,
-        });
-      } else {
-        printInfo("No session found to resume.");
-      }
+    // Resume session if requested
+    if (resume) {
+        const sessionId = getLatestSessionId();
+        if (sessionId) {
+            const session = loadSession(sessionId);
+            if (session) {
+                agent.restoreSession({
+                    anthropicMessages: session.anthropicMessages,
+                    openaiMessages: session.openaiMessages,
+                });
+            } else {
+                printInfo("No session found to resume.");
+            }
+        } else {
+            printInfo("No previous sessions found.");
+        }
+    }
+
+    if (prompt) {
+        // One-shot mode
+        try {
+            await agent.chat(prompt);
+        } catch (e: any) {
+            printError(e.message);
+            process.exit(1);
+        }
     } else {
-      printInfo("No previous sessions found.");
+        // Interactive REPL mode
+        if (!quiet) printWelcome();
+        await runRepl(agent);
     }
-  }
-
-  if (prompt) {
-    // One-shot mode
-    try {
-      await agent.chat(prompt);
-    } catch (e: any) {
-      printError(e.message);
-      process.exit(1);
-    }
-  } else {
-    // Interactive REPL mode
-    await runRepl(agent);
-  }
 }
 
 main();

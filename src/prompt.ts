@@ -16,106 +16,119 @@ const INCLUDE_REGEX = /^@(\.\/[^\s]+|~\/[^\s]+|\/[^\s]+)$/gm;
 const MAX_INCLUDE_DEPTH = 5;
 
 function resolveIncludes(
-  content: string,
-  basePath: string,
-  visited: Set<string> = new Set(),
-  depth: number = 0
+    content: string,
+    basePath: string,
+    visited: Set<string> = new Set(),
+    depth: number = 0,
 ): string {
-  if (depth >= MAX_INCLUDE_DEPTH) return content;
-  return content.replace(INCLUDE_REGEX, (_match, rawPath: string) => {
-    // Resolve the path
-    let resolved: string;
-    if (rawPath.startsWith("~/")) {
-      resolved = join(os.homedir(), rawPath.slice(2));
-    } else if (rawPath.startsWith("/")) {
-      resolved = rawPath;
-    } else {
-      // ./relative
-      resolved = resolve(basePath, rawPath);
-    }
-    resolved = resolve(resolved); // normalize
-    if (visited.has(resolved)) return `<!-- circular: ${rawPath} -->`;
-    if (!existsSync(resolved)) return `<!-- not found: ${rawPath} -->`;
-    try {
-      visited.add(resolved);
-      const included = readFileSync(resolved, "utf-8");
-      return resolveIncludes(included, dirname(resolved), visited, depth + 1);
-    } catch {
-      return `<!-- error reading: ${rawPath} -->`;
-    }
-  });
+    if (depth >= MAX_INCLUDE_DEPTH) return content;
+    return content.replace(INCLUDE_REGEX, (_match, rawPath: string) => {
+        // Resolve the path
+        let resolved: string;
+        if (rawPath.startsWith("~/")) {
+            resolved = join(os.homedir(), rawPath.slice(2));
+        } else if (rawPath.startsWith("/")) {
+            resolved = rawPath;
+        } else {
+            // ./relative
+            resolved = resolve(basePath, rawPath);
+        }
+        resolved = resolve(resolved); // normalize
+        if (visited.has(resolved)) return `<!-- circular: ${rawPath} -->`;
+        if (!existsSync(resolved)) return `<!-- not found: ${rawPath} -->`;
+        try {
+            visited.add(resolved);
+            const included = readFileSync(resolved, "utf-8");
+            return resolveIncludes(
+                included,
+                dirname(resolved),
+                visited,
+                depth + 1,
+            );
+        } catch {
+            return `<!-- error reading: ${rawPath} -->`;
+        }
+    });
 }
 
 // ─── .claude/rules/*.md auto-loader ─────────────────────────
 
 function loadRulesDir(dir: string): string {
-  const rulesDir = join(dir, ".claude", "rules");
-  if (!existsSync(rulesDir)) return "";
-  try {
-    const files = readdirSync(rulesDir)
-      .filter((f) => f.endsWith(".md"))
-      .sort();
-    if (files.length === 0) return "";
-    const parts: string[] = [];
-    for (const file of files) {
-      try {
-        let content = readFileSync(join(rulesDir, file), "utf-8");
-        content = resolveIncludes(content, rulesDir);
-        parts.push(`<!-- rule: ${file} -->\n${content}`);
-      } catch {}
+    const rulesDir = join(dir, ".claude", "rules");
+    if (!existsSync(rulesDir)) return "";
+    try {
+        const files = readdirSync(rulesDir)
+            .filter((f) => f.endsWith(".md"))
+            .sort();
+        if (files.length === 0) return "";
+        const parts: string[] = [];
+        for (const file of files) {
+            try {
+                let content = readFileSync(join(rulesDir, file), "utf-8");
+                content = resolveIncludes(content, rulesDir);
+                parts.push(`<!-- rule: ${file} -->\n${content}`);
+            } catch {}
+        }
+        return parts.length > 0 ? "\n\n## Rules\n" + parts.join("\n\n") : "";
+    } catch {
+        return "";
     }
-    return parts.length > 0 ? "\n\n## Rules\n" + parts.join("\n\n") : "";
-  } catch {
-    return "";
-  }
 }
 
 // ─── CLAUDE.md loader ────────────────────────────────────────
 
 export function loadClaudeMd(): string {
-  const parts: string[] = [];
-  let dir = process.cwd();
-  while (true) {
-    const file = join(dir, "CLAUDE.md");
-    if (existsSync(file)) {
-      try {
-        let content = readFileSync(file, "utf-8");
-        content = resolveIncludes(content, dir);
-        parts.unshift(content);
-      } catch {}
+    const parts: string[] = [];
+    let dir = process.cwd();
+    while (true) {
+        const file = join(dir, "CLAUDE.md");
+        if (existsSync(file)) {
+            try {
+                let content = readFileSync(file, "utf-8");
+                content = resolveIncludes(content, dir);
+                parts.unshift(content);
+            } catch {}
+        }
+        const parent = resolve(dir, "..");
+        if (parent === dir) break;
+        dir = parent;
     }
-    const parent = resolve(dir, "..");
-    if (parent === dir) break;
-    dir = parent;
-  }
-  // Load .claude/rules/*.md from cwd
-  const rules = loadRulesDir(process.cwd());
-  const claudeMd = parts.length > 0
-    ? "\n\n# Project Instructions (CLAUDE.md)\n" + parts.join("\n\n---\n\n")
-    : "";
-  return claudeMd + rules;
+    // Load .claude/rules/*.md from cwd
+    const rules = loadRulesDir(process.cwd());
+    const claudeMd =
+        parts.length > 0
+            ? "\n\n# Project Instructions (CLAUDE.md)\n" +
+              parts.join("\n\n---\n\n")
+            : "";
+    return claudeMd + rules;
 }
 
 // ─── Git context ─────────────────────────────────────────────
 
 export function getGitContext(): string {
-  try {
-    const opts = { encoding: "utf-8" as const, timeout: 3000, stdio: ["pipe", "pipe", "pipe"] as ["pipe", "pipe", "pipe"] };
-    const branch = execSync("git rev-parse --abbrev-ref HEAD", opts).trim();
-    const log = execSync("git log --oneline -5", opts).trim();
-    const status = execSync("git status --short", opts).trim();
-    let result = `\nGit branch: ${branch}`;
-    if (log) result += `\nRecent commits:\n${log}`;
-    if (status) result += `\nGit status:\n${status}`;
-    return result;
-  } catch {
-    return "";
-  }
+    try {
+        const opts = {
+            encoding: "utf-8" as const,
+            timeout: 3000,
+            stdio: ["pipe", "pipe", "pipe"] as ["pipe", "pipe", "pipe"],
+        };
+        const branch = execSync("git rev-parse --abbrev-ref HEAD", opts).trim();
+        const log = execSync("git log --oneline -5", opts).trim();
+        const status = execSync("git status --short", opts).trim();
+        let result = `\nGit branch: ${branch}`;
+        if (log) result += `\nRecent commits:\n${log}`;
+        if (status) result += `\nGit status:\n${status}`;
+        return result;
+    } catch {
+        return "";
+    }
 }
 
 // ─── System prompt template (embedded) ──────────────────────
 
 const SYSTEM_PROMPT_TEMPLATE = `You are Mini Claude Code, a lightweight coding assistant CLI.
+你好 {{user_name}}！我是你的编程助手。
+项目名字: {{project_name}}
 You are an interactive agent that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.
 
 IMPORTANT: Assist with authorized security testing, defensive security, CTF challenges, and educational contexts. Refuse requests for destructive techniques, DoS attacks, mass targeting, supply chain compromise, or detection evasion for malicious purposes. Dual-use security tools (C2 frameworks, credential testing, exploit development) require clear authorization context: pentesting engagements, CTF competitions, security research, or defensive use cases.
@@ -167,7 +180,7 @@ When you encounter an obstacle, do not use destructive actions as a shortcut to 
  - Use the \`agent\` tool with specialized agents when the task at hand matches the agent's description. Subagents are valuable for parallelizing independent queries or for protecting the main context window from excessive results, but they should not be used excessively when not needed. Importantly, avoid duplicating work that subagents are already doing - if you delegate research to a subagent, do not also perform the same searches yourself.
 
 # Tone and style
- - Only use emojis if the user explicitly requests it. Avoid using emojis in all communication unless asked.
+ - Use Kaomoji style.
  - Your responses should be short and concise.
  - When referencing specific functions or pieces of code include the pattern file_path:line_number to allow the user to easily navigate to the source code location.
  - Do not use a colon before tool calls. Your tool calls may not be shown directly in the output, so text like "Let me read the file:" followed by a read tool call should just be "Let me read the file." with a period.
@@ -212,19 +225,39 @@ export function buildSystemPrompt(): string {
   const agentSection = buildAgentDescriptions();
 
   const deferredNames = getDeferredToolNames();
-  const deferredSection = deferredNames.length > 0
-    ? `\n\nThe following deferred tools are available via tool_search: ${deferredNames.join(", ")}. Use tool_search to fetch their full schemas when needed.`
-    : "";
+  const deferredSection =
+    deferredNames.length > 0
+      ? `\n\nThe following deferred tools are available via tool_search: ${deferredNames.join(", ")}. Use tool_search to fetch their full schemas when needed.`
+      : "";
 
-  return SYSTEM_PROMPT_TEMPLATE
-    .split("{{cwd}}").join(process.cwd())
-    .split("{{date}}").join(date)
-    .split("{{platform}}").join(platform)
-    .split("{{shell}}").join(shell)
-    .split("{{git_context}}").join(gitContext)
-    .split("{{claude_md}}").join(claudeMd)
-    .split("{{memory}}").join(memorySection)
-    .split("{{skills}}").join(skillsSection)
-    .split("{{agents}}").join(agentSection)
-    .split("{{deferred_tools}}").join(deferredSection);
+  const result = SYSTEM_PROMPT_TEMPLATE.split("{{cwd}}")
+    .join(process.cwd())
+    .split("{{date}}")
+    .join(date)
+    .split("{{platform}}")
+    .join(platform)
+    .split("{{shell}}")
+    .join(shell)
+    .split("{{git_context}}")
+    .join(gitContext)
+    .split("{{claude_md}}")
+    .join(claudeMd)
+    .split("{{memory}}")
+    .join(memorySection)
+    .split("{{skills}}")
+    .join(skillsSection)
+    .split("{{agents}}")
+    .join(agentSection)
+    .split("{{deferred_tools}}")
+    .join(deferredSection)
+    .split("{{project-name}}")
+    .join(process.env.USER || "claude-code-from-scratch")
+    .split("{{project_name}}")
+    .join("claude-code-from-scratch")
+    .split("{{user_name}}")
+    .join(process.env.USER || "friend");
+  console.log("=== SYSTEM PROMPT ===");
+  console.log(result);
+  console.log("=== END ===");
+  return result;
 }

@@ -1,5 +1,7 @@
-# Test Project Rules
+## 项目规则
+- 代码用 TypeScript
+- 测试用 Vitest
 
-@./.claude/rules/chinese-greeting.md
+@./README.md
 
-This is a test project for mini-claude feature validation.
+关键代码用 TypeScript 写

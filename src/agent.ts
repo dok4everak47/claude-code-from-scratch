@@ -38,7 +38,7 @@ import {
 } from "./memory.js";
 import { McpManager } from "./mcp.js";
 import * as readline from "readline";
-import { randomUUID } from "crypto";
+import { randomUUID, X509Certificate } from "crypto";
 import { existsSync, readFileSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
@@ -203,6 +203,8 @@ export class Agent {
 
   // Permission whitelist: paths confirmed in this session
   private confirmedPaths: Set<string> = new Set();
+  private compactFailCount = 0;
+  private readonly MAX_COMPACT_FAILS = 3;
 
   // Plan mode state
   private prePlanMode: PermissionMode | null = null;
@@ -557,44 +559,67 @@ export class Agent {
   }
 
   private async compactAnthropic(): Promise<void> {
-    // Invariant: caller must ensure the last message is a plain user-text
-    // message (not a tool_result). We slice it off below; if it were a
-    // tool_result, the preceding assistant's tool_use would be orphaned and
-    // the API would reject the summarize call.
+    if (this.compactFailCount >= this.MAX_COMPACT_FAILS) return;
     if (this.anthropicMessages.length < 4) return;
-    const lastUserMsg =
-      this.anthropicMessages[this.anthropicMessages.length - 1];
-    const summaryReq: Anthropic.MessageParam[] = [
-      {
-        role: "user",
-        content:
-          "Summarize the conversation so far in a concise paragraph, preserving key decisions, file paths, and context needed to continue the work.",
-      },
-    ];
-    const summaryResp = await this.anthropicClient!.messages.create({
-      model: this.model,
-      max_tokens: 2048,
-      system:
-        "You are a conversation summarizer. Be concise but preserve important details.",
-      messages: [...this.anthropicMessages.slice(0, -1), ...summaryReq],
-    });
-    const summaryText =
-      summaryResp.content[0]?.type === "text"
-        ? summaryResp.content[0].text
-        : "No summary available.";
-    this.anthropicMessages = [
-      {
-        role: "user",
-        content: `[Previous conversation summary]\n${summaryText}`,
-      },
-      {
-        role: "assistant",
-        content:
-          "Understood. I have the context from our previous conversation. How can I continue helping?",
-      },
-    ];
-    if (lastUserMsg.role === "user") this.anthropicMessages.push(lastUserMsg);
-    this.lastInputTokenCount = 0;
+
+    try {
+      const lastUserMsg =
+        this.anthropicMessages[this.anthropicMessages.length - 1];
+      const summaryReq: Anthropic.MessageParam[] = [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: "Analyze the conversation, then produce a structured summary.",
+            },
+            {
+              type: "text",
+              text:
+                "<analysis>\n" +
+                "List key decisions made, files modified, tools used,\n" +
+                "bugs found, and current task state.\n" +
+                "</analysis>\n\n" +
+                "<summary>\n" +
+                "## Key Decisions\n- ...\n" +
+                "## Files Modified\n- ...\n" +
+                "## Current State\n- ...\n" +
+                "</summary>",
+            },
+          ],
+        },
+      ];
+      const summaryResp = await this.anthropicClient!.messages.create({
+        model: this.model,
+        max_tokens: 2048,
+        system:
+          "You are a conversation summarizer. Be concise but preserve important details.",
+        messages: [...this.anthropicMessages.slice(0, -1), ...summaryReq],
+      });
+      const summaryText =
+        summaryResp.content[0]?.type === "text"
+          ? summaryResp.content[0].text
+          : "No summary available.";
+      this.anthropicMessages = [
+        {
+          role: "user",
+          content: `[Previous conversation summary]\n${summaryText}`,
+        },
+        {
+          role: "assistant",
+          content:
+            "Understood. I have the context from our previous conversation. How can I continue helping?",
+        },
+      ];
+      if (lastUserMsg.role === "user") this.anthropicMessages.push(lastUserMsg);
+      this.lastInputTokenCount = 0;
+      this.compactFailCount = 0;
+    } catch {
+      this.compactFailCount++;
+      if (this.compactFailCount >= this.MAX_COMPACT_FAILS) {
+        printInfo("Auto-compact disabled after 3 consecutive failures");
+      }
+    }
   }
 
   private async compactOpenAI(): Promise<void> {
@@ -602,43 +627,70 @@ export class Agent {
     // message (not a `tool` role result). Same reasoning as compactAnthropic
     // — slicing off a tool result would orphan the preceding assistant's
     // tool_calls.
+    if (this.compactFailCount >= this.MAX_COMPACT_FAILS) return;
     if (this.openaiMessages.length < 5) return;
-    const systemMsg = this.openaiMessages[0];
-    const lastUserMsg = this.openaiMessages[this.openaiMessages.length - 1];
-    const summaryResp = await this.openaiClient!.chat.completions.create({
-      model: this.model,
-      max_tokens: 2048,
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are a conversation summarizer. Be concise but preserve important details.",
-        },
-        ...this.openaiMessages.slice(1, -1),
+
+    try {
+      const systemMsg = this.openaiMessages[0];
+      const lastUserMsg = this.openaiMessages[this.openaiMessages.length - 1];
+      const summaryResp = await this.openaiClient!.chat.completions.create({
+        model: this.model,
+        max_tokens: 2048,
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are a conversation summarizer. Be concise but preserve important details.",
+          },
+          ...this.openaiMessages.slice(1, -1),
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: "Analyze the conversation, then produce a structured summary.",
+              },
+              {
+                type: "text",
+                text:
+                  "<analysis>\n" +
+                  "List key decisions made, files modified, tools used,\n" +
+                  "bugs found, and current task state.\n" +
+                  "</analysis>\n\n" +
+                  "<summary>\n" +
+                  "## Key Decisions\n- ...\n" +
+                  "## Files Modified\n- ...\n" +
+                  "## Current State\n- ...\n" +
+                  "</summary>",
+              },
+            ],
+          },
+        ],
+      });
+      const summaryText =
+        summaryResp.choices[0]?.message?.content || "No summary available.";
+      this.openaiMessages = [
+        systemMsg,
         {
           role: "user",
-          content:
-            "Summarize the conversation so far in a concise paragraph, preserving key decisions, file paths, and context needed to continue the work.",
+          content: `[Previous conversation summary]\n${summaryText}`,
         },
-      ],
-    });
-    const summaryText =
-      summaryResp.choices[0]?.message?.content || "No summary available.";
-    this.openaiMessages = [
-      systemMsg,
-      {
-        role: "user",
-        content: `[Previous conversation summary]\n${summaryText}`,
-      },
-      {
-        role: "assistant",
-        content:
-          "Understood. I have the context from our previous conversation. How can I continue helping?",
-      },
-    ];
-    if ((lastUserMsg as any).role === "user")
-      this.openaiMessages.push(lastUserMsg);
-    this.lastInputTokenCount = 0;
+        {
+          role: "assistant",
+          content:
+            "Understood. I have the context from our previous conversation. How can I continue helping?",
+        },
+      ];
+      if ((lastUserMsg as any).role === "user")
+        this.openaiMessages.push(lastUserMsg);
+      this.lastInputTokenCount = 0;
+      this.compactFailCount = 0;
+    } catch {
+      this.compactFailCount++;
+      if (this.compactFailCount >= this.MAX_COMPACT_FAILS) {
+        printInfo("Auto-compact disabled after 3 consecutive failures");
+      }
+    }
   }
 
   // ─── Multi-tier compression pipeline ──────────────────────
@@ -836,6 +888,7 @@ export class Agent {
     }
   }
 
+  // Tier 3: Microcompact — aggressively clear old results when prompt cache is cold
   private microcompactOpenAI(): void {
     if (
       !this.lastApiCallTime ||

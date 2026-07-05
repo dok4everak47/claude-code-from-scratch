@@ -1,11 +1,13 @@
 // ============================================================
 // App — main layout with tab switching:
-//   [📋 场景模式] [✨ 自由模式] + [⚙️ API 设置]
+//   [📋 场景模式] [✨ 自由模式] [🔬 对比模式] + [⚙️ API 设置]
 // ============================================================
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AgentLoop, createInitialState } from '@/engine/agent'
 import { LiveAgent } from '@/engine/liveAgent'
+import { ComparisonAgent, createComparisonState } from '@/engine/comparisonAgent'
+import type { ComparisonState } from '@/engine/comparisonAgent'
 import { liveTools } from '@/engine/liveTools'
 import { scenarios } from '@/engine/scenarios'
 import type {
@@ -21,7 +23,7 @@ import StepTimeline from '@/components/StepTimeline'
 import ScenarioSelector from '@/components/ScenarioSelector'
 import ApiSettings from '@/components/ApiSettings'
 
-type AppMode = 'scenario' | 'live'
+type AppMode = 'scenario' | 'live' | 'comparison'
 
 export default function App() {
   // ---- Mode ----
@@ -45,8 +47,13 @@ export default function App() {
   const [liveState, setLiveState] = useState<LiveSessionState>(createLiveSessionState())
   const liveAgentRef = useRef<LiveAgent | null>(null)
 
+  // ---- Comparison mode state ----
+  const [comparisonState, setComparisonState] = useState<ComparisonState>(createComparisonState())
+  const comparisonAgentRef = useRef<ComparisonAgent | null>(null)
+  const [comparisonDraft, setComparisonDraft] = useState('')
+
   // ============================================================
-  // Initialize both agents
+  // Initialize all agents
   // ============================================================
 
   useEffect(() => {
@@ -70,9 +77,22 @@ export default function App() {
     liveAgent.setTools(liveTools)
     liveAgentRef.current = liveAgent
 
+    // Comparison agent
+    const comparisonAgent = new ComparisonAgent(
+      {
+        apiKey: apiConfig.apiKey,
+        baseUrl: apiConfig.baseUrl,
+        model: apiConfig.model,
+        maxTurns: apiConfig.maxTurns,
+      },
+      { onStateChange: (s) => setComparisonState(s) },
+    )
+    comparisonAgentRef.current = comparisonAgent
+
     return () => {
       scenarioAgent.destroy()
       liveAgent.stop()
+      comparisonAgent.stop()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -86,6 +106,14 @@ export default function App() {
         model: apiConfig.model,
         maxTurns: apiConfig.maxTurns,
         systemPrompt: apiConfig.systemPrompt,
+      })
+    }
+    if (comparisonAgentRef.current) {
+      comparisonAgentRef.current.setConfig({
+        apiKey: apiConfig.apiKey,
+        baseUrl: apiConfig.baseUrl,
+        model: apiConfig.model,
+        maxTurns: apiConfig.maxTurns,
       })
     }
   }, [apiConfig])
@@ -164,6 +192,30 @@ export default function App() {
   }, [apiConfig])
 
   // ============================================================
+  // Comparison mode handlers
+  // ============================================================
+
+  const handleComparisonRun = useCallback(() => {
+    const text = comparisonDraft.trim()
+    if (!text || comparisonState.isRunning) return
+    setComparisonDraft('')
+    comparisonAgentRef.current?.run(text)
+  }, [comparisonDraft, comparisonState.isRunning])
+
+  const handleComparisonStop = useCallback(() => {
+    comparisonAgentRef.current?.stop()
+  }, [])
+
+  const handleComparisonRetry = useCallback(() => {
+    comparisonAgentRef.current?.reset()
+    setComparisonDraft('')
+  }, [])
+
+  const handleComparisonStopSingle = useCallback((index: number) => {
+    comparisonAgentRef.current?.stop(index)
+  }, [])
+
+  // ============================================================
   // Derived scenario state
   // ============================================================
 
@@ -218,6 +270,19 @@ export default function App() {
             >
               ✨ 自由模式
             </button>
+            <button
+              type="button"
+              onClick={() => setMode('comparison')}
+              className={`
+                px-3 py-1.5 text-sm font-medium rounded-md transition-all
+                ${mode === 'comparison'
+                  ? 'bg-slate-700 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+                }
+              `}
+            >
+              🔬 对比模式
+            </button>
           </div>
 
           {/* Settings button */}
@@ -263,6 +328,26 @@ export default function App() {
                     ? `对话中 · ${liveState.messages.length} 条消息`
                     : '输入问题开始对话'}
                 </span>
+              )}
+            </div>
+          )}
+
+          {/* Comparison mode status */}
+          {mode === 'comparison' && (
+            <div className="flex-1 flex items-center justify-end gap-3">
+              {comparisonState.isRunning ? (
+                <span className="text-xs text-yellow-400 flex items-center gap-1.5">
+                  <span className="spin inline-block w-3 h-3 border-2 border-yellow-400/30 border-t-yellow-400 rounded-full" />
+                  对比运行中...
+                </span>
+              ) : comparisonState.userMessage ? (
+                <span className="text-xs text-slate-500">
+                  对比完成 · 问题：{comparisonState.userMessage.length > 30
+                    ? comparisonState.userMessage.slice(0, 30) + '...'
+                    : comparisonState.userMessage}
+                </span>
+              ) : (
+                <span className="text-xs text-slate-500">输入问题，对比 3 种策略差异</span>
               )}
             </div>
           )}
@@ -488,6 +573,192 @@ export default function App() {
           </footer>
         </>
       )}
+
+      {/* ============================================================ */}
+      {/* COMPARISON MODE */}
+      {/* ============================================================ */}
+      {mode === 'comparison' && (
+        <>
+          {/* Top: input bar */}
+          <div className="flex-shrink-0 border-b border-slate-700/50 px-4 py-3 bg-slate-800/50">
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-semibold text-slate-400 whitespace-nowrap">
+                📝 输入问题
+              </span>
+              <input
+                type="text"
+                value={comparisonDraft}
+                onChange={(e) => setComparisonDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    handleComparisonRun()
+                  }
+                }}
+                placeholder="输入一个问题，对比 3 种策略的 Tool Call 差异..."
+                disabled={comparisonState.isRunning}
+                className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 disabled:opacity-50"
+              />
+              {comparisonState.isRunning ? (
+                <button
+                  type="button"
+                  onClick={handleComparisonStop}
+                  className="px-4 py-1.5 text-sm font-medium rounded-lg bg-red-800 hover:bg-red-700 text-red-200 transition-colors border border-red-700/50 flex-shrink-0"
+                >
+                  ⏹ 全部停止
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleComparisonRun}
+                  disabled={!comparisonDraft.trim()}
+                  className="px-4 py-1.5 text-sm font-medium rounded-lg bg-blue-600 hover:bg-blue-500 text-white disabled:bg-slate-700 disabled:text-slate-500 transition-colors flex-shrink-0"
+                >
+                  ▶ 运行
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleComparisonRetry}
+                disabled={comparisonState.isRunning}
+                className="px-3 py-1.5 text-sm font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors border border-slate-700 flex-shrink-0"
+                title="清空重置"
+              >
+                🔄 重置
+              </button>
+            </div>
+          </div>
+
+          {/* Middle: 3-column AgentFlow */}
+          <main className="flex-1 flex min-h-0">
+            {comparisonState.columns.map((col, i) => (
+              <ComparisonColumn
+                key={col.key}
+                column={col}
+                isRunning={comparisonState.isRunning}
+                onStop={() => handleComparisonStopSingle(i)}
+              />
+            ))}
+          </main>
+
+          {/* Bottom: stats bar */}
+          <footer className="flex-shrink-0 border-t border-slate-700/50 bg-slate-900/90 backdrop-blur-sm">
+            <div className="flex items-center justify-center gap-6 px-4 py-2.5">
+              {comparisonState.columns.map((col) => {
+                const toolCount = col.steps.filter((s) => s.type === 'tool_call').length
+                const duration = col.endTime && col.startTime
+                  ? ((col.endTime - col.startTime) / 1000).toFixed(1) + 's'
+                  : col.isLoading
+                    ? '运行中...'
+                    : '—'
+                const toolNames = [...new Set(
+                  col.steps
+                    .filter((s) => s.type === 'tool_call' && s.toolCall)
+                    .map((s) => s.toolCall!.name),
+                )]
+                return (
+                  <div
+                    key={col.key}
+                    className="flex items-center gap-3 text-xs bg-slate-800/50 rounded-lg px-3 py-1.5 border border-slate-700/30"
+                  >
+                    <span className="font-semibold text-slate-300">{col.label}</span>
+                    <span className="text-slate-500">|</span>
+                    <span title={toolNames.join(', ') || '无'}>
+                      🔧 <span className="text-slate-300 font-mono">{toolCount}</span>
+                      <span className="text-slate-500"> 次调用</span>
+                    </span>
+                    <span className="text-slate-500">|</span>
+                    <span>
+                      ⏱ <span className="text-slate-300 font-mono">{duration}</span>
+                    </span>
+                    {col.error && (
+                      <>
+                        <span className="text-slate-500">|</span>
+                        <span className="text-red-400 truncate max-w-[200px]" title={col.error}>
+                          ⚠️ {col.error.length > 30 ? col.error.slice(0, 30) + '...' : col.error}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </footer>
+        </>
+      )}
     </div>
+  )
+}
+
+// ============================================================
+// ComparisonColumn — single column in comparison mode
+// ============================================================
+
+function ComparisonColumn({
+  column,
+  isRunning,
+  onStop,
+}: {
+  column: import('@/engine/comparisonAgent').ComparisonColumnState
+  isRunning: boolean
+  onStop: () => void
+}) {
+  const toolCount = column.steps.filter((s) => s.type === 'tool_call').length
+
+  return (
+    <section className="flex-1 min-w-0 border-r border-slate-700/50 last:border-r-0 flex flex-col">
+      {/* Column header */}
+      <div className="px-3 py-2 border-b border-slate-700/30 bg-slate-800/50 flex items-center justify-between flex-shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-xs font-semibold text-slate-300 truncate">
+            {column.key === 'default' ? '🟢' : column.key === 'aggressive' ? '🟡' : '🔵'}{' '}
+            {column.label}
+          </span>
+          {column.isLoading && (
+            <span className="spin inline-block w-3 h-3 border-2 border-yellow-400/30 border-t-yellow-400 rounded-full flex-shrink-0" />
+          )}
+        </div>
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          <span className="text-[10px] text-slate-500 font-mono">
+            🔧{toolCount} · 轮{column.currentTurn}
+          </span>
+          {column.isLoading && (
+            <button
+              type="button"
+              onClick={onStop}
+              className="text-[10px] px-1.5 py-0.5 rounded bg-red-900/30 hover:bg-red-900/50 text-red-400 border border-red-700/30 transition-colors"
+              title="停止此列"
+            >
+              ⏹
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Column body: AgentFlow */}
+      <div className="flex-1 overflow-y-auto p-2 min-h-0">
+        {column.steps.length === 0 && !column.isLoading ? (
+          <div className="flex flex-col items-center justify-center h-full text-slate-600 gap-2">
+            <span className="text-2xl">
+              {column.key === 'default' ? '🧠' : column.key === 'aggressive' ? '⚡' : '🛡️'}
+            </span>
+            <p className="text-[11px] text-center px-2">
+              {isRunning ? '等待开始...' : '点击上方「运行」开始对比'}
+            </p>
+          </div>
+        ) : column.error ? (
+          <div className="flex flex-col items-center justify-center h-full text-red-400 gap-2 p-3">
+            <span className="text-2xl">⚠️</span>
+            <p className="text-xs text-center break-all">{column.error}</p>
+          </div>
+        ) : (
+          <AgentFlow
+            steps={column.steps}
+            currentStepIndex={column.steps.length - 1}
+            isLive
+          />
+        )}
+      </div>
+    </section>
   )
 }

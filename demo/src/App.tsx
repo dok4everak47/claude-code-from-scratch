@@ -51,6 +51,47 @@ export default function App() {
   const [comparisonState, setComparisonState] = useState<ComparisonState>(createComparisonState())
   const comparisonAgentRef = useRef<ComparisonAgent | null>(null)
   const [comparisonDraft, setComparisonDraft] = useState('')
+  const [comparisonSubMode, setComparisonSubMode] = useState<'summary' | 'detail'>('summary')
+
+  // ---- History state ----
+  const HISTORY_STORAGE_KEY = 'demo-comparison-history'
+  const MAX_HISTORY = 20
+
+  interface HistoryColumnData {
+    key: string
+    label: string
+    toolCallCount: number
+    toolCallSequence: string[]
+    durationMs: number
+    turnCount: number
+    summary: string
+    error: string | null
+  }
+
+  interface ComparisonHistoryEntry {
+    id: string
+    userMessage: string
+    timestamp: number
+    columns: HistoryColumnData[]
+  }
+
+  const [comparisonHistory, setComparisonHistory] = useState<ComparisonHistoryEntry[]>(() => {
+    try {
+      const stored = localStorage.getItem(HISTORY_STORAGE_KEY)
+      if (stored) return JSON.parse(stored)
+    } catch { /* ignore */ }
+    return []
+  })
+  const [historyOpen, setHistoryOpen] = useState(true)
+  const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null)
+  const [viewingHistory, setViewingHistory] = useState<ComparisonHistoryEntry | null>(null)
+
+  // Persist history to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(comparisonHistory))
+    } catch { /* quota exceeded etc */ }
+  }, [comparisonHistory])
 
   // ============================================================
   // Initialize all agents
@@ -199,6 +240,7 @@ export default function App() {
     const text = comparisonDraft.trim()
     if (!text || comparisonState.isRunning) return
     setComparisonDraft('')
+    setComparisonSubMode('detail')
     comparisonAgentRef.current?.run(text)
   }, [comparisonDraft, comparisonState.isRunning])
 
@@ -213,6 +255,71 @@ export default function App() {
 
   const handleComparisonStopSingle = useCallback((index: number) => {
     comparisonAgentRef.current?.stop(index)
+  }, [])
+
+  // Auto-switch to summary when all columns finish
+  useEffect(() => {
+    if (comparisonSubMode === 'detail' &&
+        !comparisonState.isRunning &&
+        comparisonState.columns.some((c) => c.steps.length > 0)) {
+      // Small delay so the last streaming state renders before switching
+      const timer = setTimeout(() => setComparisonSubMode('summary'), 800)
+      return () => clearTimeout(timer)
+    }
+  }, [comparisonState.isRunning, comparisonSubMode])
+
+  // Save to history when comparison completes
+  useEffect(() => {
+    if (comparisonState.isRunning || comparisonState.columns.every((c) => c.steps.length === 0)) return
+
+    const entry: ComparisonHistoryEntry = {
+      id: `hist-${Date.now()}`,
+      userMessage: comparisonState.userMessage,
+      timestamp: Date.now(),
+      columns: comparisonState.columns.map((col) => {
+        const toolSteps = col.steps.filter((s) => s.type === 'tool_call' && s.toolCall)
+        return {
+          key: col.key,
+          label: col.label,
+          toolCallCount: toolSteps.length,
+          toolCallSequence: toolSteps.map((s) => s.toolCall!.name),
+          durationMs: col.endTime && col.startTime ? col.endTime - col.startTime : 0,
+          turnCount: col.currentTurn,
+          summary: (col.steps.find((s) => s.type === 'response')?.content ?? '').slice(0, 200),
+          error: col.error,
+        }
+      }),
+    }
+
+    setComparisonHistory((prev) => {
+      const next = [entry, ...prev]
+      return next.slice(0, MAX_HISTORY)
+    })
+    setSelectedHistoryId(entry.id)
+    setViewingHistory(null)
+  }, [comparisonState.isRunning])
+
+  // History click handlers
+  const handleHistorySelect = useCallback((entry: ComparisonHistoryEntry) => {
+    setViewingHistory(entry)
+    setSelectedHistoryId(entry.id)
+    setComparisonSubMode('summary')
+  }, [])
+
+  const handleHistoryDelete = useCallback((id: string) => {
+    setComparisonHistory((prev) => prev.filter((e) => e.id !== id))
+    if (selectedHistoryId === id) {
+      setSelectedHistoryId(null)
+      setViewingHistory(null)
+    }
+  }, [selectedHistoryId])
+
+  const handleHistoryRerun = useCallback((entry: ComparisonHistoryEntry) => {
+    setComparisonDraft(entry.userMessage)
+    setViewingHistory(null)
+    // Directly run - don't wait for state to flush
+    setComparisonSubMode('detail')
+    comparisonAgentRef.current?.run(entry.userMessage)
   }, [])
 
   // ============================================================
@@ -629,61 +736,235 @@ export default function App() {
             </div>
           </div>
 
-          {/* Middle: 3-column AgentFlow */}
-          <main className="flex-1 flex min-h-0">
-            {comparisonState.columns.map((col, i) => (
-              <ComparisonColumn
-                key={col.key}
-                column={col}
-                isRunning={comparisonState.isRunning}
-                onStop={() => handleComparisonStopSingle(i)}
-              />
-            ))}
-          </main>
-
-          {/* Bottom: stats bar */}
-          <footer className="flex-shrink-0 border-t border-slate-700/50 bg-slate-900/90 backdrop-blur-sm">
-            <div className="flex items-center justify-center gap-6 px-4 py-2.5">
-              {comparisonState.columns.map((col) => {
-                const toolCount = col.steps.filter((s) => s.type === 'tool_call').length
-                const duration = col.endTime && col.startTime
-                  ? ((col.endTime - col.startTime) / 1000).toFixed(1) + 's'
-                  : col.isLoading
-                    ? '运行中...'
-                    : '—'
-                const toolNames = [...new Set(
-                  col.steps
-                    .filter((s) => s.type === 'tool_call' && s.toolCall)
-                    .map((s) => s.toolCall!.name),
-                )]
-                return (
-                  <div
-                    key={col.key}
-                    className="flex items-center gap-3 text-xs bg-slate-800/50 rounded-lg px-3 py-1.5 border border-slate-700/30"
-                  >
-                    <span className="font-semibold text-slate-300">{col.label}</span>
-                    <span className="text-slate-500">|</span>
-                    <span title={toolNames.join(', ') || '无'}>
-                      🔧 <span className="text-slate-300 font-mono">{toolCount}</span>
-                      <span className="text-slate-500"> 次调用</span>
-                    </span>
-                    <span className="text-slate-500">|</span>
-                    <span>
-                      ⏱ <span className="text-slate-300 font-mono">{duration}</span>
-                    </span>
-                    {col.error && (
-                      <>
-                        <span className="text-slate-500">|</span>
-                        <span className="text-red-400 truncate max-w-[200px]" title={col.error}>
-                          ⚠️ {col.error.length > 30 ? col.error.slice(0, 30) + '...' : col.error}
-                        </span>
-                      </>
-                    )}
-                  </div>
-                )
-              })}
+          {/* Historical comparison panel */}
+          {comparisonHistory.length > 0 && (
+            <div className="flex-shrink-0 border-b border-slate-700/50 bg-slate-800/30">
+              <button
+                type="button"
+                onClick={() => setHistoryOpen(!historyOpen)}
+                className="w-full px-4 py-1.5 flex items-center justify-between text-xs text-slate-400 hover:text-slate-200 transition-colors"
+              >
+                <span className="flex items-center gap-1.5">
+                  <span>📜</span>
+                  <span className="font-medium">历史对比</span>
+                  <span className="text-slate-600">({comparisonHistory.length})</span>
+                  {viewingHistory && (
+                    <span className="text-blue-400 ml-1">— 查看中：{viewingHistory.userMessage.slice(0, 20)}...</span>
+                  )}
+                </span>
+                <span className={`transition-transform ${historyOpen ? '' : 'rotate-180'}`}>▼</span>
+              </button>
+              {historyOpen && (
+                <div className="px-4 pb-2 space-y-1 max-h-32 overflow-y-auto">
+                  {comparisonHistory.slice(0, 10).map((entry) => {
+                    const now = Date.now()
+                    const diff = now - entry.timestamp
+                    const relTime = diff < 60000 ? `${Math.floor(diff / 1000)}秒前`
+                      : diff < 3600000 ? `${Math.floor(diff / 60000)}分钟前`
+                        : diff < 86400000 ? `${Math.floor(diff / 3600000)}小时前`
+                          : `${Math.floor(diff / 86400000)}天前`
+                    const totalCalls = entry.columns.reduce((s, c) => s + c.toolCallCount, 0)
+                    const isActive = selectedHistoryId === entry.id
+                    return (
+                      <div
+                        key={entry.id}
+                        className={`
+                          flex items-center gap-2 px-2 py-1 rounded text-xs transition-colors
+                          ${isActive ? 'bg-blue-900/30 text-blue-200' : 'hover:bg-slate-700/50 text-slate-400'}
+                        `}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => handleHistorySelect(entry)}
+                          className="flex-1 flex items-center gap-2 min-w-0 text-left"
+                        >
+                          <span className="truncate">{entry.userMessage}</span>
+                          <span className="text-slate-600 flex-shrink-0">· {totalCalls} 次调用</span>
+                          <span className="text-slate-600 flex-shrink-0">· {relTime}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleHistoryRerun(entry)}
+                          className="px-1.5 py-0.5 rounded bg-blue-900/30 hover:bg-blue-900/50 text-blue-400 flex-shrink-0 transition-colors"
+                          title="重新运行"
+                        >
+                          ▶
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleHistoryDelete(entry.id)}
+                          className="px-1.5 py-0.5 rounded hover:bg-red-900/30 text-slate-500 hover:text-red-400 flex-shrink-0 transition-colors"
+                          title="删除"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    )
+                  })}
+                  {comparisonHistory.length > 10 && (
+                    <div className="text-[10px] text-slate-600 text-center pt-1">
+                      还有 {comparisonHistory.length - 10} 条历史记录
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
-          </footer>
+          )}
+
+          {/* Sub-mode tabs: summary / detail */}
+          <div className="flex-shrink-0 border-b border-slate-700/50 px-4 py-1.5 bg-slate-800/40">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setComparisonSubMode('summary')}
+                className={`
+                  px-3 py-1 text-xs font-medium rounded-md transition-all
+                  ${comparisonSubMode === 'summary'
+                    ? 'bg-slate-700 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                  }
+                `}
+              >
+                📊 总结
+              </button>
+              <button
+                type="button"
+                onClick={() => setComparisonSubMode('detail')}
+                className={`
+                  px-3 py-1 text-xs font-medium rounded-md transition-all
+                  ${comparisonSubMode === 'detail'
+                    ? 'bg-slate-700 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                  }
+                `}
+              >
+                🔍 详细
+              </button>
+
+              {/* Quick status indicator */}
+              {comparisonState.isRunning && (
+                <span className="text-[10px] text-yellow-400 flex items-center gap-1 ml-2">
+                  <span className="spin inline-block w-2.5 h-2.5 border-2 border-yellow-400/30 border-t-yellow-400 rounded-full" />
+                  运行中 — 完成后自动切换到总结
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Middle: summary cards or detail columns */}
+          {comparisonSubMode === 'summary' ? (
+            /* === Summary view: compact cards + bottom summary === */
+            <>
+              <main className="flex-1 flex min-h-0">
+                {(viewingHistory ? viewingHistory.columns : comparisonState.columns).map((col, i) => (
+                  <ComparisonCard
+                    key={col.key}
+                    data={col}
+                    isLast={i === (viewingHistory ? viewingHistory.columns.length - 1 : comparisonState.columns.length - 1)}
+                    onStop={() => !viewingHistory && handleComparisonStopSingle(i)}
+                  />
+                ))}
+              </main>
+
+              <footer className="flex-shrink-0 border-t border-slate-700/50 bg-slate-900/90 backdrop-blur-sm">
+                <div className="px-4 py-2.5">
+                  {viewingHistory ? (
+                    <ComparisonSummaryFromHistory columns={viewingHistory.columns} userMessage={viewingHistory.userMessage} />
+                  ) : comparisonState.columns.some((c) => c.isLoading) ? (
+                    <div className="flex items-center gap-2 text-xs text-slate-500">
+                      <span className="spin inline-block w-3 h-3 border-2 border-slate-400/30 border-t-slate-400 rounded-full" />
+                      等待所有策略运行完成...
+                    </div>
+                  ) : comparisonState.columns.every((c) => c.steps.length === 0) && !comparisonState.isRunning ? (
+                    <div className="text-xs text-slate-600 text-center">
+                      输入问题并点击「运行」开始对比
+                    </div>
+                  ) : (
+                    <ComparisonSummary columns={comparisonState.columns} />
+                  )}
+                </div>
+              </footer>
+            </>
+          ) : (
+            /* === Detail view: 3-column full AgentFlow === */
+            <>
+              <main className="flex-1 flex min-h-0">
+                {comparisonState.columns.map((col, i) => (
+                  <section
+                    key={col.key}
+                    className={`flex-1 min-w-0 flex flex-col ${
+                      i < comparisonState.columns.length - 1 ? 'border-r border-slate-700/50' : ''
+                    }`}
+                  >
+                    <div className="px-3 py-1.5 border-b border-slate-700/30 bg-slate-800/50 flex items-center justify-between flex-shrink-0">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="text-xs font-semibold text-slate-300 truncate">
+                          {col.key === 'default' ? '🟢' : col.key === 'aggressive' ? '🔴' : '🔵'} {col.label}
+                        </span>
+                        {col.isLoading && (
+                          <span className="spin inline-block w-2.5 h-2.5 border-2 border-yellow-400/30 border-t-yellow-400 rounded-full" />
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        <span className="text-[10px] text-slate-500 font-mono">
+                          🔧{col.steps.filter((s) => s.type === 'tool_call').length} · 轮{col.currentTurn}
+                        </span>
+                        {col.isLoading && (
+                          <button
+                            type="button"
+                            onClick={() => handleComparisonStopSingle(i)}
+                            className="text-[10px] px-1.5 py-0.5 rounded bg-red-900/30 hover:bg-red-900/50 text-red-400 border border-red-700/30 transition-colors"
+                            title="停止此列"
+                          >
+                            ⏹
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-2 min-h-0">
+                      {col.steps.length === 0 && !col.isLoading ? (
+                        <div className="flex flex-col items-center justify-center h-full text-slate-600 gap-2">
+                          <span className="text-2xl">
+                            {col.key === 'default' ? '🧠' : col.key === 'aggressive' ? '⚡' : '🛡️'}
+                          </span>
+                          <p className="text-[11px] text-center px-2">等待运行...</p>
+                        </div>
+                      ) : col.error ? (
+                        <div className="flex flex-col items-center justify-center h-full text-red-400 gap-2 p-3">
+                          <span className="text-2xl">⚠️</span>
+                          <p className="text-xs text-center break-all">{col.error}</p>
+                        </div>
+                      ) : (
+                        <AgentFlow
+                          steps={col.steps}
+                          currentStepIndex={col.steps.length - 1}
+                          isLive
+                        />
+                      )}
+                    </div>
+                  </section>
+                ))}
+              </main>
+
+              <footer className="flex-shrink-0 border-t border-slate-700/50 bg-slate-900/90 backdrop-blur-sm">
+                <div className="flex items-center justify-center gap-4 px-4 py-2">
+                  {comparisonState.columns.some((c) => c.isLoading) ? (
+                    <span className="text-xs text-slate-500">⏳ 运行中...</span>
+                  ) : comparisonState.columns.some((c) => c.steps.length > 0) ? (
+                    <button
+                      type="button"
+                      onClick={() => setComparisonSubMode('summary')}
+                      className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+                    >
+                      📊 查看总结对比
+                    </button>
+                  ) : (
+                    <span className="text-xs text-slate-600">输入问题并点击「运行」开始对比</span>
+                  )}
+                </div>
+              </footer>
+            </>
+          )}
         </>
       )}
     </div>
@@ -691,74 +972,318 @@ export default function App() {
 }
 
 // ============================================================
-// ComparisonColumn — single column in comparison mode
+// ComparisonCard — accepts either live state or history data
 // ============================================================
 
-function ComparisonColumn({
-  column,
-  isRunning,
+function ComparisonCard({
+  data,
+  isLast,
   onStop,
 }: {
-  column: import('@/engine/comparisonAgent').ComparisonColumnState
-  isRunning: boolean
-  onStop: () => void
+  data: import('@/engine/comparisonAgent').ComparisonColumnState | {
+    key: string
+    label: string
+    toolCallCount: number
+    toolCallSequence: string[]
+    durationMs: number
+    turnCount: number
+    summary: string
+    error: string | null
+  }
+  isLast: boolean
+  onStop?: () => void
 }) {
-  const toolCount = column.steps.filter((s) => s.type === 'tool_call').length
+  const [expanded, setExpanded] = useState(false)
+
+  const TOOL_ICON_MAP: Record<string, string> = {
+    get_weather: '🌤️',
+    search_hotel: '🏨',
+    search_flight: '✈️',
+    search_web: '🔍',
+    calculate: '🔢',
+    get_time: '🕐',
+  }
+  const getToolIcon = (name: string) => TOOL_ICON_MAP[name] ?? '🔧'
+
+  // Extract fields — support both live state and history data
+  const isLive = 'steps' in data
+  const live = data as import('@/engine/comparisonAgent').ComparisonColumnState
+
+  const label = data.label
+  const key = data.key
+  const error = data.error
+
+  // Tool call info
+  const toolCallData: { count: number; sequence: string[] } = isLive
+    ? {
+        count: live.steps.filter((s) => s.type === 'tool_call').length,
+        sequence: live.steps
+          .filter((s): s is typeof s & { toolCall: NonNullable<typeof s.toolCall> } => s.type === 'tool_call' && !!s.toolCall)
+          .map((s) => s.toolCall.name),
+      }
+    : { count: data.toolCallCount, sequence: data.toolCallSequence }
+
+  // Duration
+  const duration = isLive
+    ? live.endTime && live.startTime
+      ? ((live.endTime - live.startTime) / 1000).toFixed(1) + 's'
+      : live.isLoading ? '运行中...' : '—'
+    : data.durationMs > 0 ? (data.durationMs / 1000).toFixed(1) + 's' : '—'
+
+  // Current turn
+  const turnCount = isLive ? live.currentTurn : data.turnCount
+
+  // Response summary
+  const responseSummary = isLive
+    ? (live.steps.find((s) => s.type === 'response')?.content ?? '').slice(0, 100)
+    : data.summary.slice(0, 100)
+
+  const hasDetail = isLive && toolCallData.count > 0
+
+  const colorMap: Record<string, { dot: string; bg: string; border: string }> = {
+    default: { dot: '🟢', bg: 'from-emerald-900/10 to-transparent', border: 'border-emerald-700/30' },
+    aggressive: { dot: '🔴', bg: 'from-red-900/10 to-transparent', border: 'border-red-700/30' },
+    conservative: { dot: '🔵', bg: 'from-blue-900/10 to-transparent', border: 'border-blue-700/30' },
+  }
+  const colors = colorMap[key] ?? colorMap.default
+
+  const isActuallyLoading = isLive ? (data as any).isLoading : false
+  const statusIcon = isActuallyLoading
+    ? <span className="spin inline-block w-3 h-3 border-2 border-yellow-400/30 border-t-yellow-400 rounded-full" />
+    : error
+      ? <span className="text-red-400">❌</span>
+      : toolCallData.count > 0
+        ? <span className="text-emerald-400">✅</span>
+        : <span className="text-slate-500">✅</span>
 
   return (
-    <section className="flex-1 min-w-0 border-r border-slate-700/50 last:border-r-0 flex flex-col">
-      {/* Column header */}
-      <div className="px-3 py-2 border-b border-slate-700/30 bg-slate-800/50 flex items-center justify-between flex-shrink-0">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="text-xs font-semibold text-slate-300 truncate">
-            {column.key === 'default' ? '🟢' : column.key === 'aggressive' ? '🟡' : '🔵'}{' '}
-            {column.label}
-          </span>
-          {column.isLoading && (
-            <span className="spin inline-block w-3 h-3 border-2 border-yellow-400/30 border-t-yellow-400 rounded-full flex-shrink-0" />
-          )}
-        </div>
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          <span className="text-[10px] text-slate-500 font-mono">
-            🔧{toolCount} · 轮{column.currentTurn}
-          </span>
-          {column.isLoading && (
-            <button
-              type="button"
-              onClick={onStop}
-              className="text-[10px] px-1.5 py-0.5 rounded bg-red-900/30 hover:bg-red-900/50 text-red-400 border border-red-700/30 transition-colors"
-              title="停止此列"
-            >
-              ⏹
-            </button>
-          )}
-        </div>
-      </div>
+    <section
+      className={`flex-1 min-w-0 flex flex-col border-r border-slate-700/50 ${isLast ? 'border-r-0' : ''}`}
+    >
+      {/* Card body */}
+      <div
+        className="flex-1 overflow-y-auto min-h-0"
+        onClick={() => hasDetail && setExpanded(!expanded)}
+      >
+        <div
+          className={`h-full p-3 bg-gradient-to-b ${colors.bg} border-b ${colors.border} flex flex-col gap-2.5`}
+        >
+          {/* Header: strategy name + status */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <span className="text-sm">{colors.dot}</span>
+              <span className="text-sm font-semibold text-slate-200">{label}</span>
+            </div>
+            <div className="flex items-center gap-1">
+              {statusIcon}
+              {isActuallyLoading && onStop && (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onStop() }}
+                  className="text-[10px] px-1.5 py-0.5 rounded bg-red-900/30 hover:bg-red-900/50 text-red-400 border border-red-700/30 transition-colors"
+                  title="停止此列"
+                >
+                  ⏹
+                </button>
+              )}
+            </div>
+          </div>
 
-      {/* Column body: AgentFlow */}
-      <div className="flex-1 overflow-y-auto p-2 min-h-0">
-        {column.steps.length === 0 && !column.isLoading ? (
-          <div className="flex flex-col items-center justify-center h-full text-slate-600 gap-2">
-            <span className="text-2xl">
-              {column.key === 'default' ? '🧠' : column.key === 'aggressive' ? '⚡' : '🛡️'}
-            </span>
-            <p className="text-[11px] text-center px-2">
-              {isRunning ? '等待开始...' : '点击上方「运行」开始对比'}
-            </p>
+          {/* Tool call sequence */}
+          <div>
+            <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">
+              Tool Call 调用序列
+            </div>
+            <div className="flex items-center flex-wrap gap-1">
+              {toolCallData.sequence.length === 0 ? (
+                <span className="text-xs text-slate-500">—</span>
+              ) : (
+                toolCallData.sequence.map((name, i) => (
+                  <span key={i} className="flex items-center gap-0.5">
+                    {i > 0 && <span className="text-slate-600 text-xs mx-0.5">→</span>}
+                    <span
+                      className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs bg-slate-800/70 border border-slate-700/50"
+                      title={name}
+                    >
+                      <span>{getToolIcon(name)}</span>
+                      <span className="text-slate-300">{name}</span>
+                    </span>
+                  </span>
+                ))
+              )}
+            </div>
           </div>
-        ) : column.error ? (
-          <div className="flex flex-col items-center justify-center h-full text-red-400 gap-2 p-3">
-            <span className="text-2xl">⚠️</span>
-            <p className="text-xs text-center break-all">{column.error}</p>
+
+          {/* Stats row: tool count + duration + turns */}
+          <div className="grid grid-cols-3 gap-2">
+            <div className="bg-slate-900/40 rounded-lg p-2 text-center">
+              <div className="text-2xl font-bold font-mono text-slate-100">{toolCallData.count}</div>
+              <div className="text-[10px] text-slate-500">工具调用</div>
+            </div>
+            <div className="bg-slate-900/40 rounded-lg p-2 text-center">
+              <div className="text-lg font-semibold font-mono text-slate-100">{duration}</div>
+              <div className="text-[10px] text-slate-500">耗时</div>
+            </div>
+            <div className="bg-slate-900/40 rounded-lg p-2 text-center">
+              <div className="text-lg font-semibold font-mono text-slate-100">{turnCount}</div>
+              <div className="text-[10px] text-slate-500">轮次</div>
+            </div>
           </div>
-        ) : (
-          <AgentFlow
-            steps={column.steps}
-            currentStepIndex={column.steps.length - 1}
-            isLive
-          />
+
+          {/* Final answer summary */}
+          {responseSummary && !isActuallyLoading && (
+            <div>
+              <div className="flex items-center gap-1 mb-0.5">
+                <span className="text-[10px] text-slate-500 uppercase tracking-wider">最终回答</span>
+                {hasDetail && (
+                  <span className="text-[10px] text-slate-600">
+                    — 点击{expanded ? '收起' : '展开'}详情
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-300 leading-relaxed bg-slate-900/30 rounded-lg px-2.5 py-1.5">
+                {responseSummary}
+              </p>
+            </div>
+          )}
+
+          {/* Error */}
+          {error && (
+            <div className="bg-red-900/20 border border-red-700/30 rounded-lg px-2.5 py-1.5">
+              <span className="text-xs text-red-400">{error}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Expanded detail: full AgentFlow (only for live data with steps) */}
+        {expanded && hasDetail && (
+          <div className="border-t border-slate-700/30">
+            <div className="px-3 py-1.5 bg-slate-800/50 border-b border-slate-700/30">
+              <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">🧠 详细 Agent 流程</span>
+            </div>
+            <div className="overflow-y-auto max-h-96 p-2">
+              <AgentFlow
+                steps={isLive ? (data as any).steps : []}
+                currentStepIndex={isLive ? (data as any).steps.length - 1 : 0}
+                isLive
+              />
+            </div>
+          </div>
+        )}
+        {expanded && !hasDetail && (
+          <div className="border-t border-slate-700/30 p-3 text-center text-xs text-slate-500">
+            历史记录仅保存摘要，不包含详细流程
+          </div>
         )}
       </div>
     </section>
+  )
+}
+
+// ============================================================
+// ComparisonSummaryFromHistory — summary text for a history entry
+// ============================================================
+
+function ComparisonSummaryFromHistory({ columns, userMessage }: {
+  columns: Array<{
+    key: string
+    label: string
+    toolCallCount: number
+    toolCallSequence: string[]
+    durationMs: number
+    turnCount: number
+    summary: string
+    error: string | null
+  }>
+  userMessage: string
+}) {
+  const lines: string[] = [`📄 问题：${userMessage}`]
+
+  for (const col of columns) {
+    const seq = col.toolCallSequence.length > 0
+      ? col.toolCallSequence.join(' → ')
+      : '没有调用工具，直接使用自身知识回答'
+    const dur = col.durationMs > 0 ? (col.durationMs / 1000).toFixed(1) : '?'
+    if (col.error) {
+      lines.push(`• ${col.label} 执行失败：${col.error}`)
+    } else {
+      lines.push(`• ${col.label} 调用了 ${col.toolCallCount} 次工具（${seq}），耗时 ${dur}s，共 ${col.turnCount} 轮`)
+    }
+  }
+
+  // Cross-column comparison
+  const completed = columns.filter((c) => !c.error)
+  if (completed.length >= 2) {
+    const counts = completed.map((c) => ({ label: c.label, count: c.toolCallCount, dur: c.durationMs }))
+    const maxCount = Math.max(...counts.map((c) => c.count))
+    const minCount = Math.min(...counts.map((c) => c.count))
+    const most = counts.filter((c) => c.count === maxCount).map((c) => c.label).join('、')
+    const least = counts.filter((c) => c.count === minCount).map((c) => c.label).join('、')
+    if (maxCount > 0) lines.push(`• ${most} 调用了最多工具（${maxCount} 次），${least} 调用最少（${minCount} 次）`)
+  }
+
+  return <div className="text-xs text-slate-400 leading-relaxed">{lines.map((l, i) => <div key={i} className="mt-0.5">{l}</div>)}</div>
+}
+
+// ============================================================
+// ComparisonSummary — auto-generated text at the bottom
+// ============================================================
+
+function ComparisonSummary({ columns }: { columns: import('@/engine/comparisonAgent').ComparisonColumnState[] }) {
+  const lines: string[] = []
+
+  // Per-column tool call summaries
+  for (const col of columns) {
+    const toolSteps = col.steps.filter((s) => s.type === 'tool_call' && s.toolCall)
+    const toolNames = toolSteps.map((s) => s.toolCall!.name)
+    const toolSequence = toolNames.length > 0
+      ? toolNames.join(' → ')
+      : '没有调用工具，直接使用自身知识回答'
+    const duration = col.endTime && col.startTime
+      ? ((col.endTime - col.startTime) / 1000).toFixed(1) : '?'
+
+    if (col.error) {
+      lines.push(`• ${col.label} 执行失败：${col.error}`)
+    } else {
+      lines.push(`• ${col.label} 调用了 ${toolNames.length} 次工具（${toolSequence}），耗时 ${duration}s，共 ${col.currentTurn} 轮`)
+    }
+  }
+
+  // Cross-column comparison
+  const completed = columns.filter((c) => !c.isLoading && !c.error)
+  if (completed.length >= 2) {
+    const counts = completed.map((c) => ({
+      label: c.label,
+      count: c.steps.filter((s) => s.type === 'tool_call').length,
+      dur: c.endTime && c.startTime ? c.endTime - c.startTime : Infinity,
+    }))
+
+    const maxCount = Math.max(...counts.map((c) => c.count))
+    const minCount = Math.min(...counts.map((c) => c.count))
+    const maxDur = Math.max(...counts.map((c) => c.dur))
+    const minDur = Math.min(...counts.map((c) => c.dur))
+
+    const mostTools = counts.filter((c) => c.count === maxCount).map((c) => c.label).join('、')
+    const leastTools = counts.filter((c) => c.count === minCount).map((c) => c.label).join('、')
+    const fastest = counts.filter((c) => c.dur === minDur).map((c) => c.label).join('、')
+    const slowest = counts.filter((c) => c.dur === maxDur).map((c) => c.label).join('、')
+
+    if (maxCount > 0) {
+      lines.push(`• ${mostTools} 调用了最多工具（${maxCount} 次），${leastTools} 调用最少（${minCount} 次）`)
+    }
+    if (minDur < Infinity) {
+      lines.push(`• ${fastest} 速度最快（${(minDur / 1000).toFixed(1)}s），${slowest} 最慢（${(maxDur / 1000).toFixed(1)}s）`)
+    }
+  }
+
+  if (lines.length === 0) return null
+
+  return (
+    <div className="text-xs text-slate-400 leading-relaxed">
+      <span className="font-semibold text-slate-300">📊 对比总结</span>
+      {lines.map((line, i) => (
+        <div key={i} className="mt-0.5">{line}</div>
+      ))}
+    </div>
   )
 }

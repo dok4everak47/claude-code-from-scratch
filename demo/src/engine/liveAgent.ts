@@ -330,10 +330,11 @@ export class LiveAgent {
 
     if (!response.ok) {
       const errText = await response.text().catch(() => '')
-      let errMsg = `API 错误 ${response.status}: ${response.statusText}`
+      let errMsg = `API 错误 ${response.status}`
       try {
         const errJson = JSON.parse(errText)
-        if (errJson.error?.message) errMsg = errJson.error.message
+        // Proxy returns { error: "..." } or DeepSeek returns { error: { message: "..." } }
+        errMsg = errJson.error?.message || errJson.error || errMsg
       } catch { /* ignore */ }
       throw new Error(errMsg)
     }

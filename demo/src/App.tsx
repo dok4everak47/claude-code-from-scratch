@@ -27,7 +27,18 @@ type AppMode = 'scenario' | 'live' | 'comparison'
 
 export default function App() {
   // ---- Mode ----
-  const [mode, setMode] = useState<AppMode>('scenario')
+  const [mode, setMode] = useState<AppMode>(() => {
+    try {
+      const stored = localStorage.getItem('agent-demo-active-mode')
+      if (stored === 'scenario' || stored === 'live' || stored === 'comparison') return stored
+    } catch { /* ignore */ }
+    return 'scenario'
+  })
+
+  // Persist active tab to localStorage
+  useEffect(() => {
+    localStorage.setItem('agent-demo-active-mode', mode)
+  }, [mode])
 
   // ---- API Config ----
   const [apiConfig, setApiConfig] = useState<ApiConfig>(() => {

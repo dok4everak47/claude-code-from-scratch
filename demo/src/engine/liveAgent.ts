@@ -281,11 +281,24 @@ export class LiveAgent {
   ): Promise<{ content: string; toolCalls: Array<{ id: string; name: string; arguments: string }> | null }> {
     const { baseUrl, model } = this.config
 
-    // Normalize base URL — remove trailing slash and /chat/completions
-    let normalizedUrl = baseUrl.replace(/\/+$/, '')
-    if (!normalizedUrl.endsWith('/chat/completions')) {
-      // Anthropic format or other — we assume OpenAI-compatible
-      normalizedUrl = normalizedUrl.replace(/\/+$/, '') + '/chat/completions'
+    // Determine if we're running on Vercel (production) — use proxy
+    const isProd = typeof import.meta !== 'undefined' && import.meta.env?.PROD === true
+    const useProxy = isProd || (typeof window !== 'undefined' && !window.location.hostname.includes('localhost'))
+
+    let fetchUrl: string
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+
+    if (useProxy) {
+      // Deployed: use relative proxy path, API key is server-side
+      fetchUrl = '/api/proxy'
+    } else {
+      // Local dev: use configured base URL with API key
+      let normalizedUrl = baseUrl.replace(/\/+$/, '')
+      if (!normalizedUrl.endsWith('/chat/completions')) {
+        normalizedUrl = normalizedUrl.replace(/\/+$/, '') + '/chat/completions'
+      }
+      fetchUrl = normalizedUrl
+      headers.Authorization = `Bearer ${this.config.apiKey}`
     }
 
     // Convert tools to OpenAI format
@@ -308,12 +321,9 @@ export class LiveAgent {
       body.tool_choice = 'auto'
     }
 
-    const response = await fetch(normalizedUrl, {
+    const response = await fetch(fetchUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.config.apiKey}`,
-      },
+      headers,
       body: JSON.stringify(body),
       signal: this.abortController?.signal,
     })

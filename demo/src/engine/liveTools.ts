@@ -41,21 +41,42 @@ const getWeather: LiveToolDef = {
     required: ['city'],
   },
   execute: async (args) => {
-    await delay()
     const city = String(args.city ?? '未知城市')
-    const conditions = ['晴天', '多云', '阴天', '小雨', '阵雨', '晴间多云', '大风']
-    const temp = randInt(8, 36)
-    const humidity = randInt(30, 90)
-    const wind = randInt(2, 30)
-    const condition = pick(conditions)
-    return JSON.stringify({
-      city,
-      temperature_c: temp,
-      condition,
-      humidity,
-      wind_kmh: wind,
-      updated_at: now(),
-    })
+
+    try {
+      // 调用 wttr.in 免费天气 API（无需 API Key）
+      const url = `https://wttr.in/${encodeURIComponent(city)}?format=%C|%t|%h|%w`
+      const res = await fetch(url)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const text = await res.text()
+      // wttr.in 返回格式: "Sunny|+25°C|55%|12km/h"
+      const parts = text.split('|')
+      return JSON.stringify({
+        city,
+        condition: parts[0]?.trim() || '未知',
+        temperature: parts[1]?.trim() || '未知',
+        humidity: parts[2]?.trim() || '未知',
+        wind: parts[3]?.trim() || '未知',
+        updated_at: now(),
+        source: 'wttr.in',
+      })
+    } catch {
+      // API 失败时回退到 mock 数据，不崩溃
+      const conditions = ['晴天', '多云', '阴天', '小雨', '阵雨', '晴间多云', '大风']
+      const temp = randInt(8, 36)
+      const humidity = randInt(30, 90)
+      const wind = randInt(2, 30)
+      const condition = pick(conditions)
+      return JSON.stringify({
+        city,
+        temperature_c: temp,
+        condition,
+        humidity,
+        wind_kmh: wind,
+        updated_at: now(),
+        source: 'mock (wttr.in 不可用)',
+      })
+    }
   },
 }
 

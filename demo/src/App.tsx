@@ -26,6 +26,9 @@ import ApiSettings from '@/components/ApiSettings'
 type AppMode = 'scenario' | 'live' | 'comparison'
 
 export default function App() {
+  // ---- Detect deployment — when on Vercel, hide API settings panel ----
+  const isDeployed = import.meta.env.PROD === true
+
   // ---- Mode ----
   const [mode, setMode] = useState<AppMode>(() => {
     try {
@@ -403,21 +406,23 @@ export default function App() {
             </button>
           </div>
 
-          {/* Settings button */}
-          <button
-            type="button"
-            onClick={() => setSettingsOpen(!settingsOpen)}
-            className={`
-              px-3 py-1.5 text-sm font-medium rounded-lg transition-all flex-shrink-0
-              ${settingsOpen
-                ? 'bg-blue-600 text-white'
-                : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
-              }
-            `}
-            title="API 设置"
-          >
-            ⚙️ API 设置
-          </button>
+          {/* Settings button — hidden on Vercel (proxy mode) */}
+          {!isDeployed && (
+            <button
+              type="button"
+              onClick={() => setSettingsOpen(!settingsOpen)}
+              className={`
+                px-3 py-1.5 text-sm font-medium rounded-lg transition-all flex-shrink-0
+                ${settingsOpen
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
+                }
+              `}
+              title="API 设置"
+            >
+              ⚙️ API 设置
+            </button>
+          )}
 
           {/* Scenario selector (only in scenario mode) */}
           {mode === 'scenario' && (
@@ -472,13 +477,15 @@ export default function App() {
         </div>
       </header>
 
-      {/* === API Settings panel (collapsible, shared across modes) === */}
-      <ApiSettings
-        config={apiConfig}
-        onChange={setApiConfig}
-        isOpen={settingsOpen}
-        onToggle={() => setSettingsOpen(false)}
-      />
+      {/* === API Settings panel (hidden on Vercel) === */}
+	      {!isDeployed && (
+	        <ApiSettings
+	          config={apiConfig}
+	          onChange={setApiConfig}
+	          isOpen={settingsOpen}
+	          onToggle={() => setSettingsOpen(false)}
+	        />
+	      )}
 
       {/* ============================================================ */}
       {/* SCENARIO MODE */}

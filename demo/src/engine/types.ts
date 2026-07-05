@@ -67,3 +67,78 @@ export interface AgentState {
   /** The scenario data being played */
   scenario: Scenario | null
 }
+
+// ============================================================
+// Live / Free mode types
+// ============================================================
+
+/** A tool definition registered with the LLM (OpenAI function calling format) */
+export interface LiveToolDef {
+  name: string
+  description: string
+  parameters: Record<string, unknown>
+  /** Execute the tool with parsed arguments, return a string result */
+  execute: (args: Record<string, unknown>) => Promise<string>
+}
+
+/** Persisted API configuration */
+export interface ApiConfig {
+  provider: 'openai' | 'anthropic' | 'custom'
+  baseUrl: string
+  model: string
+  apiKey: string
+  maxTurns: number
+  systemPrompt: string
+}
+
+/** Default API config */
+export function defaultApiConfig(): ApiConfig {
+  return {
+    provider: 'openai',
+    baseUrl: 'https://api.openai.com/v1',
+    model: 'gpt-4o',
+    apiKey: '',
+    maxTurns: 10,
+    systemPrompt: `你是一个具备工具调用能力的 AI 助手。当用户提出问题时：
+1. 分析用户需求，确定是否需要调用工具
+2. 如果需要，调用合适的工具获取信息
+3. 基于工具返回的结果，给出准确、有帮助的回答
+4. 如果工具调用失败，分析原因并尝试修正后重试
+
+请用中文回答用户的问题。`,
+  }
+}
+
+/** A message in a live conversation */
+export interface LiveMessage {
+  id: string
+  role: 'user' | 'assistant' | 'tool'
+  content: string
+  /** For tool messages: the tool call ID this result belongs to */
+  toolCallId?: string
+  /** For assistant messages: tool calls made in this turn */
+  toolCalls?: ToolCall[]
+  timestamp: string
+  /** True while the LLM is still streaming this message */
+  isStreaming?: boolean
+}
+
+/** State of a live agent session */
+export interface LiveSessionState {
+  messages: LiveMessage[]
+  steps: AgentStep[]
+  isLoading: boolean
+  currentTurn: number
+  error: string | null
+}
+
+/** Default initial live session state */
+export function createLiveSessionState(): LiveSessionState {
+  return {
+    messages: [],
+    steps: [],
+    isLoading: false,
+    currentTurn: 0,
+    error: null,
+  }
+}

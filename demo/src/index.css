@@ -36,3 +36,59 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #64748b;
 }
+
+/* ============================================================ */
+/* Live mode animations                                         */
+/* ============================================================ */
+
+/* Blinking cursor for streaming text */
+@keyframes blink-cursor {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.cursor-blink::after {
+  content: '▊';
+  animation: blink-cursor 1s step-end infinite;
+  color: #60a5fa;
+}
+
+/* Pulsing border for running tool cards */
+@keyframes breathe-border {
+  0%, 100% { border-color: rgb(250 204 21 / 0.5); }
+  50% { border-color: rgb(250 204 21 / 0.9); }
+}
+
+.tool-card-running {
+  animation: breathe-border 1.5s ease-in-out infinite;
+}
+
+/* Fade in for new steps */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.step-enter {
+  animation: fade-in 0.3s ease-out;
+}
+
+/* Pulse dot for running status */
+@keyframes pulse-dot {
+  0%, 100% { box-shadow: 0 0 0 0 rgb(250 204 21 / 0.4); }
+  50% { box-shadow: 0 0 0 6px rgb(250 204 21 / 0); }
+}
+
+.pulse-dot {
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+/* Spinner for loading */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}

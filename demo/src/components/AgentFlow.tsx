@@ -2,26 +2,43 @@
 // AgentFlow — vertical timeline showing agent thinking process
 // ============================================================
 
+import { useEffect, useRef } from 'react'
 import type { AgentStep } from '@/engine/types'
 import ToolCard from './ToolCard'
 
 interface AgentFlowProps {
   steps: AgentStep[]
   currentStepIndex: number
+  /** When true, auto-scroll to the latest step (live mode) */
+  isLive?: boolean
 }
 
-export default function AgentFlow({ steps, currentStepIndex }: AgentFlowProps) {
+export default function AgentFlow({ steps, currentStepIndex, isLive = false }: AgentFlowProps) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const bottomRef = useRef<HTMLDivElement>(null)
+
+  // Auto-scroll to bottom when new steps appear in live mode
+  useEffect(() => {
+    if (isLive && bottomRef.current) {
+      bottomRef.current.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [steps.length, isLive])
+
   if (steps.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-slate-500 gap-3">
         <span className="text-4xl">🧠</span>
-        <p className="text-sm">选择一个场景开始观察 Agent 思考过程</p>
+        {isLive ? (
+          <p className="text-sm">输入问题，观察 Agent 的实时思考过程</p>
+        ) : (
+          <p className="text-sm">选择一个场景开始观察 Agent 思考过程</p>
+        )}
       </div>
     )
   }
 
   return (
-    <div className="relative pl-6">
+    <div ref={containerRef} className="relative pl-6">
       {/* Vertical timeline line */}
       <div className="absolute left-[11px] top-2 bottom-2 w-0.5 bg-slate-700/50" />
 
@@ -34,7 +51,7 @@ export default function AgentFlow({ steps, currentStepIndex }: AgentFlowProps) {
           return (
             <div
               key={step.id}
-              className={`relative transition-all duration-500 ${
+              className={`relative transition-all duration-500 step-enter ${
                 isPending ? 'opacity-30' : 'opacity-100'
               }`}
             >
@@ -97,6 +114,9 @@ export default function AgentFlow({ steps, currentStepIndex }: AgentFlowProps) {
             </div>
           )
         })}
+
+        {/* Invisible sentinel for auto-scroll */}
+        <div ref={bottomRef} />
       </div>
     </div>
   )

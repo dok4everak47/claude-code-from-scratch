@@ -21,7 +21,7 @@ const STATUS_CONFIG: Record<
     bg: 'bg-yellow-900/20',
     text: 'text-yellow-400',
     border: 'border-yellow-700/50',
-    dot: 'bg-yellow-400 animate-pulse',
+    dot: 'bg-yellow-400 pulse-dot',
   },
   success: {
     label: '成功',
@@ -45,7 +45,7 @@ interface ToolCardProps {
 }
 
 export default function ToolCard({ toolCall, isActive }: ToolCardProps) {
-  const [expanded, setExpanded] = useState(toolCall.status === 'error')
+  const [expanded, setExpanded] = useState(toolCall.status === 'error' || toolCall.status === 'running')
   const cfg = STATUS_CONFIG[toolCall.status]
 
   let parsedInput: unknown = null
@@ -67,6 +67,7 @@ export default function ToolCard({ toolCall, isActive }: ToolCardProps) {
       className={`
         rounded-lg border ${cfg.border} ${cfg.bg}
         transition-all duration-300
+        ${toolCall.status === 'running' ? 'tool-card-running' : ''}
         ${isActive ? 'ring-2 ring-blue-500/50 shadow-lg shadow-blue-500/10' : ''}
       `}
     >
@@ -81,7 +82,19 @@ export default function ToolCard({ toolCall, isActive }: ToolCardProps) {
 
         {/* Tool icon */}
         <span className="text-lg flex-shrink-0">
-          {toolCall.name === 'get_weather' ? '🌤️' : toolCall.name === 'search_hotel' ? '🏨' : '✈️'}
+          {toolCall.name === 'get_weather'
+            ? '🌤️'
+            : toolCall.name === 'search_hotel'
+              ? '🏨'
+              : toolCall.name === 'search_flight'
+                ? '✈️'
+                : toolCall.name === 'search_web'
+                  ? '🔍'
+                  : toolCall.name === 'calculate'
+                    ? '🔢'
+                    : toolCall.name === 'get_time'
+                      ? '🕐'
+                      : '🔧'}
         </span>
 
         {/* Tool name & description */}
@@ -96,6 +109,11 @@ export default function ToolCard({ toolCall, isActive }: ToolCardProps) {
           </div>
           <p className="text-xs text-slate-400 truncate mt-0.5">{toolCall.description}</p>
         </div>
+
+        {/* Running spinner */}
+        {toolCall.status === 'running' && (
+          <span className="spin text-yellow-400 text-sm flex-shrink-0">⏳</span>
+        )}
 
         {/* Expand chevron */}
         <span
@@ -121,7 +139,17 @@ export default function ToolCard({ toolCall, isActive }: ToolCardProps) {
           </div>
 
           {/* Output or Error */}
-          {toolCall.status === 'error' && toolCall.error ? (
+          {toolCall.status === 'running' && !toolCall.output ? (
+            <div>
+              <div className="text-[10px] font-semibold text-yellow-400 uppercase tracking-wider mb-1">
+                Output
+              </div>
+              <div className="text-xs text-yellow-300/70 bg-yellow-900/10 rounded p-2 flex items-center gap-2">
+                <span className="spin inline-block">⏳</span>
+                等待工具返回...
+              </div>
+            </div>
+          ) : toolCall.status === 'error' && toolCall.error ? (
             <div>
               <div className="text-[10px] font-semibold text-red-400 uppercase tracking-wider mb-1">
                 Error

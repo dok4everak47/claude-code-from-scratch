@@ -59,11 +59,18 @@ const getWeather: LiveToolDef = {
 
     try {
       // Step 1: 地理编码 — 城市名 → 经纬度
-      const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=zh`
-      const geoRes = await fetch(geoUrl)
-      if (!geoRes.ok) throw new Error(`Geocoding HTTP ${geoRes.status}`)
-      const geoData = await geoRes.json()
-      if (!geoData.results?.length) throw new Error(`未找到城市: ${city}`)
+      // 先用中文语言查，失败后用无语言参数重试
+      let geoData
+      for (const lang of ['zh', '']) {
+        const langParam = lang ? `&language=${lang}` : ''
+        const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1${langParam}`
+        const geoRes = await fetch(geoUrl)
+        if (geoRes.ok) {
+          geoData = await geoRes.json()
+          if (geoData.results?.length) break
+        }
+      }
+      if (!geoData?.results?.length) throw new Error(`未找到城市: ${city}`)
       const { latitude, longitude, name, country } = geoData.results[0]
 
       // Step 2: 用经纬度查实时天气

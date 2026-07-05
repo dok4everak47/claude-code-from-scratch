@@ -103,6 +103,21 @@ export default function App() {
   const handleScenarioPlay = useCallback(() => scenarioAgentRef.current?.play(2000), [])
   const handleScenarioPause = useCallback(() => scenarioAgentRef.current?.pause(), [])
   const handleScenarioReset = useCallback(() => scenarioAgentRef.current?.reset(), [])
+  const handleScenarioJumpTo = useCallback(
+    (i: number) => {
+      const loop = scenarioAgentRef.current
+      if (loop && scenarioState.scenario) {
+        loop.pause()
+        loop.reset()
+        setTimeout(() => {
+          for (let n = 0; n <= i; n++) {
+            loop.next()
+          }
+        }, 50)
+      }
+    },
+    [scenarioState.scenario],
+  )
 
   // ============================================================
   // Live mode handlers
@@ -291,7 +306,7 @@ export default function App() {
                 </span>
               </div>
               <div className="flex-1 overflow-y-auto p-4 min-h-0">
-                <AgentFlow steps={steps} currentStepIndex={currentIdx} />
+                <AgentFlow steps={steps} currentStepIndex={currentIdx} onStepClick={handleScenarioJumpTo} />
               </div>
             </section>
           </main>
@@ -303,18 +318,7 @@ export default function App() {
                 <StepTimeline
                   steps={steps}
                   currentStepIndex={currentIdx}
-                  onStepClick={(i) => {
-                    const loop = scenarioAgentRef.current
-                    if (loop && scenarioState.scenario) {
-                      loop.pause()
-                      loop.reset()
-                      setTimeout(() => {
-                        for (let n = 0; n <= i; n++) {
-                          loop.next()
-                        }
-                      }, 50)
-                    }
-                  }}
+                  onStepClick={handleScenarioJumpTo}
                 />
               </div>
             )}

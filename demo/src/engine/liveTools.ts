@@ -44,21 +44,22 @@ const getWeather: LiveToolDef = {
     const city = String(args.city ?? '未知城市')
 
     try {
-      // 调用 wttr.in 免费天气 API（无需 API Key）
-      const url = `https://wttr.in/${encodeURIComponent(city)}?format=%C|%t|%h|%w`
+      // 调用 OpenWeatherMap API
+      const apiKey = 'be8c9ad4bb488b61c8163854ce2e6282'
+      const url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)}&appid=${apiKey}&units=metric&lang=zh_cn`
       const res = await fetch(url)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const text = await res.text()
-      // wttr.in 返回格式: "Sunny|+25°C|55%|12km/h"
-      const parts = text.split('|')
+      const data = await res.json()
+      const condition = data.weather?.[0]?.description || '未知'
+      const temperature = data.main?.temp != null ? `${Math.round(data.main.temp)}°C` : '未知'
       return JSON.stringify({
         city,
-        condition: parts[0]?.trim() || '未知',
-        temperature: parts[1]?.trim() || '未知',
-        humidity: parts[2]?.trim() || '未知',
-        wind: parts[3]?.trim() || '未知',
+        temperature,
+        condition,
+        humidity: data.main?.humidity != null ? `${data.main.humidity}%` : '未知',
+        wind: data.wind?.speed != null ? `${data.wind.speed} m/s` : '未知',
         updated_at: now(),
-        source: 'wttr.in',
+        source: 'OpenWeatherMap',
       })
     } catch {
       // API 失败时回退到 mock 数据，不崩溃
@@ -74,7 +75,7 @@ const getWeather: LiveToolDef = {
         humidity,
         wind_kmh: wind,
         updated_at: now(),
-        source: 'mock (wttr.in 不可用)',
+        source: 'mock (API 不可用)',
       })
     }
   },

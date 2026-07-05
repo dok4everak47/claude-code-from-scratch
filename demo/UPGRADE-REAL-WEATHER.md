@@ -1,54 +1,42 @@
-# 升级：将 get_weather 改为真实 API 调用
+# 升级：将 get_weather 改为 OpenWeatherMap API
 
 ## 目标
 
-把 liveTools.ts 中的 get_weather 从 mock 数据改为调用真实天气 API。
-使用 **wttr.in**（完全免费，不需要 API Key）。
+把 liveTools.ts 中的 get_weather 从 wttr.in 改为调用 OpenWeatherMap API。
+API Key: be8c9ad4bb488b61c8163854ce2e6282
 
 ## 改动范围
 
-只修改 `demo/src/engine/liveTools.ts` 中的 `getWeather` 对象。
+只修改 `demo/src/engine/liveTools.ts` 中的 `getWeather.execute`。
 
 ## 具体需求
 
 ```typescript
-// 修改前：mock 随机数据
-getWeather.execute = async (args) => {
-  await delay()
-  return JSON.stringify({
-    city: args.city,
-    temperature_c: 随机数,
-    condition: 随机天气,
-    humidity: 随机数,
-    wind_kmh: 随机数,
-    updated_at: now(),
-  })
-}
+// OpenWeatherMap 接口
+const API_KEY = 'be8c9ad4bb488b61c8163854ce2e6282'
+const url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)}&appid=${API_KEY}&units=metric&lang=zh_cn`
 
-// 修改后：调用真实 API
-getWeather.execute = async (args) => {
-  const city = String(args.city ?? '')
-  // 调用 wttr.in API（不需要 API Key）
-  const url = `https://wttr.in/${encodeURIComponent(city)}?format=%C|%t|%h|%w`
-  const res = await fetch(url)
-  const text = await res.text()
-  // 解析返回格式: "Sunny|+25°C|55%|12km/h"
-  const parts = text.split('|')
-  return JSON.stringify({
-    city,
-    condition: parts[0]?.trim() || '未知',
-    temperature: parts[1]?.trim() || '未知',
-    humidity: parts[2]?.trim() || '未知',
-    wind: parts[3]?.trim() || '未知',
-    updated_at: new Date().toISOString(),
-    source: 'wttr.in',  // 标记数据来源
-  })
+// 返回 JSON 格式，直接解析：
+// {
+//   "weather": [{ "description": "晴", "main": "Clear" }],
+//   "main": { "temp": 25, "humidity": 55 },
+//   "wind": { "speed": 12 }
+// }
+```
+
+返回格式保持与之前一致：
+```json
+{
+  "city": "北京",
+  "temperature": "25°C",
+  "condition": "晴",
+  "humidity": "55%",
+  "wind": "12m/s",
+  "updated_at": "2026-...",
+  "source": "OpenWeatherMap"
 }
 ```
 
-## 注意事项
+API 失败时回退到 mock 数据（保留现有 fallback 代码）。
+其他工具不动。
 
-- wttr.in 返回的温度格式如 `+25°C`，直接保留
-- 城市名需要 encodeURIComponent 处理（如中文城市）
-- 如果 API 请求失败，回退到 mock 数据，不要崩溃
-- 其他 5 个工具（search_web, calculate, get_time, search_flight, search_hotel）保持 mock 不变

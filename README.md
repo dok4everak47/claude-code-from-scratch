@@ -50,7 +50,7 @@ Open http://localhost:5173/ to see the Agent Tool System Demo.
 
 **Live Demo:** [agent-playground-ruddy.vercel.app](https://agent-playground-ruddy.vercel.app)
 
-![Agent Tool System Demo Screenshot](demo/public/screenshot.png)
+![Agent Tool System Demo](demo/public/demo.gif)
 
 ---
 

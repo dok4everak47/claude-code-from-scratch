@@ -34,8 +34,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Error handling
     if (!response.ok) {
       const errBody = await response.text().catch(() => '')
+      // Return the full raw error so the frontend can display it
       return res.status(response.status).json({
-        error: `DeepSeek API ${response.status}: ${errBody || response.statusText}`,
+        error: `DeepSeek ${response.status} | ${errBody || response.statusText}`,
+        detail: errBody,
       })
     }
 

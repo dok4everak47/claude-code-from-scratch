@@ -334,7 +334,7 @@ export class LiveAgent {
       try {
         const errJson = JSON.parse(errText)
         // Proxy returns { error: "..." } or DeepSeek returns { error: { message: "..." } }
-        errMsg = errJson.error?.message || errJson.error || errMsg
+        errMsg = errJson.detail || errJson.error?.message || errJson.error || errMsg
       } catch { /* ignore */ }
       throw new Error(errMsg)
     }

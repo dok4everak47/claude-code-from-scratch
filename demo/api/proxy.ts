@@ -19,7 +19,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     // Override model to DeepSeek's model name, ignore what frontend sends
-    const body = { ...req.body, model: 'deepseek-chat' }
+    const body = { ...req.body, model: 'deepseek-v4-flash' }
 
     // Forward to DeepSeek API
     const response = await fetch('https://api.deepseek.com/chat/completions', {

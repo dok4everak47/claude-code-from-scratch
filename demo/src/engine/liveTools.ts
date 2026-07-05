@@ -24,6 +24,20 @@ function now(): string {
   return new Date().toISOString()
 }
 
+/** WMO weather code → 中文描述 */
+function weatherCodeToChinese(code: number): string {
+  if (code === 0) return '晴天'
+  if (code <= 3) return ['晴间多云', '多云', '阴天'][code - 1]
+  if (code <= 48) return '雾'
+  if (code <= 55) return '小雨'
+  if (code <= 65) return '雨'
+  if (code <= 75) return '雪'
+  if (code <= 82) return '阵雨'
+  if (code <= 86) return '阵雪'
+  if (code <= 99) return '雷暴'
+  return '未知'
+}
+
 // ============================================================
 // Tool: get_weather
 // ============================================================
@@ -44,22 +58,34 @@ const getWeather: LiveToolDef = {
     const city = String(args.city ?? '未知城市')
 
     try {
-      // 调用 OpenWeatherMap API
-      const apiKey = 'be8c9ad4bb488b61c8163854ce2e6282'
-      const url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)}&appid=${apiKey}&units=metric&lang=zh_cn`
-      const res = await fetch(url)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = await res.json()
-      const condition = data.weather?.[0]?.description || '未知'
-      const temperature = data.main?.temp != null ? `${Math.round(data.main.temp)}°C` : '未知'
+      // Step 1: 地理编码 — 城市名 → 经纬度
+      const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=zh`
+      const geoRes = await fetch(geoUrl)
+      if (!geoRes.ok) throw new Error(`Geocoding HTTP ${geoRes.status}`)
+      const geoData = await geoRes.json()
+      if (!geoData.results?.length) throw new Error(`未找到城市: ${city}`)
+      const { latitude, longitude, name, country } = geoData.results[0]
+
+      // Step 2: 用经纬度查实时天气
+      const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m`
+      const weatherRes = await fetch(weatherUrl)
+      if (!weatherRes.ok) throw new Error(`Weather HTTP ${weatherRes.status}`)
+      const weatherData = await weatherRes.json()
+      const current = weatherData.current
+
+      const temperature = current.temperature_2m != null ? `${Math.round(current.temperature_2m)}°C` : '未知'
+      const condition = weatherCodeToChinese(current.weather_code)
+      const humidity = current.relative_humidity_2m != null ? `${current.relative_humidity_2m}%` : '未知'
+      const wind = current.wind_speed_10m != null ? `${current.wind_speed_10m} km/h` : '未知'
+
       return JSON.stringify({
-        city,
+        city: `${name}${country ? `, ${country}` : ''}`,
         temperature,
         condition,
-        humidity: data.main?.humidity != null ? `${data.main.humidity}%` : '未知',
-        wind: data.wind?.speed != null ? `${data.wind.speed} m/s` : '未知',
+        humidity,
+        wind,
         updated_at: now(),
-        source: 'OpenWeatherMap',
+        source: 'Open-Meteo',
       })
     } catch {
       // API 失败时回退到 mock 数据，不崩溃
@@ -75,7 +101,7 @@ const getWeather: LiveToolDef = {
         humidity,
         wind_kmh: wind,
         updated_at: now(),
-        source: 'mock (API 不可用)',
+        source: 'mock (Open-Meteo 不可用)',
       })
     }
   },

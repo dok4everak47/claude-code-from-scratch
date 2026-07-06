@@ -640,6 +640,7 @@ export default function App() {
                   steps={liveState.steps}
                   currentStepIndex={liveState.steps.length - 1}
                   isLive
+                  statusFeed={liveState.statusFeed}
                 />
               </div>
             </section>

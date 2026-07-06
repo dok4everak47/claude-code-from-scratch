@@ -2,8 +2,8 @@
 // AgentFlow — vertical timeline showing agent thinking process
 // ============================================================
 
-import { useEffect, useRef } from 'react'
-import type { AgentStep } from '@/engine/types'
+import { useEffect, useRef, useState } from 'react'
+import type { AgentStep, AgentStatusFeed } from '@/engine/types'
 import ToolCard from './ToolCard'
 
 interface AgentFlowProps {
@@ -13,9 +13,11 @@ interface AgentFlowProps {
   isLive?: boolean
   /** Callback when a dependency graph node is clicked */
   onStepClick?: (index: number) => void
+  /** Real-time status feed from LiveAgent (free mode only) */
+  statusFeed?: AgentStatusFeed | null
 }
 
-export default function AgentFlow({ steps, currentStepIndex, isLive = false, onStepClick }: AgentFlowProps) {
+export default function AgentFlow({ steps, currentStepIndex, isLive = false, onStepClick, statusFeed }: AgentFlowProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -41,6 +43,9 @@ export default function AgentFlow({ steps, currentStepIndex, isLive = false, onS
 
   return (
     <div ref={containerRef} className="h-full flex flex-col">
+      {/* === Live Agent Status Feed (free mode only) === */}
+      {statusFeed && <StatusFeedPanel feed={statusFeed} />}
+
       {/* === Dependency Graph (horizontal flow) === */}
       <DependencyGraph
         steps={steps}
@@ -370,5 +375,128 @@ function Arrow({ isActive, isToCurrent }: { isActive: boolean; isToCurrent: bool
         `}
       />
     </div>
+  )
+}
+
+// ============================================================
+// StatusFeedPanel — live agent state with loop/tasks/fileTree
+// ============================================================
+
+function StatusFeedPanel({ feed }: { feed: AgentStatusFeed }) {
+  const [open, setOpen] = useState(true)
+
+  return (
+    <div className="flex-shrink-0 border-b border-slate-700/30 bg-slate-800/40">
+      {/* Header — click to collapse */}
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors"
+      >
+        <span className="flex items-center gap-1.5">
+          <span>📊</span>
+          <span className="font-medium text-slate-300">Agent Status</span>
+          <span className="text-slate-500">Loop: {feed.loopCount}</span>
+          {feed.linterActive && <span className="text-red-400">🔧 Lint: FAIL</span>}
+        </span>
+        <span className={`transition-transform ${open ? '' : 'rotate-180'}`}>▼</span>
+      </button>
+
+      {open && (
+        <div className="px-3 pb-2 space-y-2 text-xs">
+          {/* Loop count */}
+          <div className="flex items-center gap-2">
+            <span className="text-slate-500 w-16">🔄 Loop</span>
+            <span className="text-slate-200 font-mono">{feed.loopCount}</span>
+          </div>
+
+          {/* File tree */}
+          {feed.fileTree.length > 0 && (
+            <div>
+              <div className="flex items-center gap-1 text-slate-500 mb-0.5">
+                <span>📁</span>
+                <span>Files</span>
+              </div>
+              <div className="ml-4 space-y-0.5">
+                {feed.fileTree.map((f, i) => (
+                  <div key={i} className="flex items-center gap-1.5">
+                    <FileStatusBadge status={f.status} />
+                    <span className="text-slate-300 truncate max-w-[200px]">{f.path}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Task list */}
+          {feed.taskList.length > 0 && (
+            <div>
+              <div className="flex items-center gap-1 text-slate-500 mb-0.5">
+                <span>📋</span>
+                <span>Tasks</span>
+              </div>
+              <div className="ml-4 space-y-0.5">
+                {feed.taskList.map((t, i) => (
+                  <div key={i} className="flex items-center gap-1.5">
+                    <TaskStatusIcon status={t.status} />
+                    <span className="text-slate-300 truncate max-w-[220px]">{t.name}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Git state */}
+          {feed.gitState && (
+            <div className="flex items-center gap-2">
+              <span className="text-slate-500">📦 Git</span>
+              <span className="text-slate-300">{feed.gitState.branch}</span>
+              {feed.gitState.dirtyCount > 0 && (
+                <span className="text-yellow-400">({feed.gitState.dirtyCount} 个未提交)</span>
+              )}
+            </div>
+          )}
+
+          {/* Linter */}
+          <div className="flex items-center gap-2">
+            <span className="text-slate-500">🔧 Linter</span>
+            {feed.linterActive ? (
+              <span className="text-red-400">❌ FAIL</span>
+            ) : (
+              <span className="text-emerald-400">✅ PASS</span>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function FileStatusBadge({ status }: { status: string }) {
+  const map: Record<string, { icon: string; color: string }> = {
+    writing: { icon: 'W', color: 'text-yellow-400 bg-yellow-900/30' },
+    added: { icon: 'A', color: 'text-emerald-400 bg-emerald-900/30' },
+    modified: { icon: 'M', color: 'text-blue-400 bg-blue-900/30' },
+    unchanged: { icon: '·', color: 'text-slate-500 bg-slate-800/50' },
+  }
+  const cfg = map[status] ?? map.unchanged
+  return (
+    <span className={`inline-flex items-center justify-center w-4 h-4 rounded text-[9px] font-bold ${cfg.color}`}>
+      {cfg.icon}
+    </span>
+  )
+}
+
+function TaskStatusIcon({ status }: { status: string }) {
+  const map: Record<string, string> = {
+    pending: '⏸',
+    running: '🔄',
+    completed: '✅',
+    failed: '❌',
+  }
+  return (
+    <span className={`text-xs ${status === 'running' ? 'spin inline-block' : ''}`}>
+      {map[status] ?? '⏸'}
+    </span>
   )
 }

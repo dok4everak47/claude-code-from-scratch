@@ -2,7 +2,7 @@
 // LiveAgent — real Agent Loop calling LLM API with streaming
 // ============================================================
 
-import type { AgentStep, LiveToolDef, LiveMessage, LiveSessionState, ToolCall, ToolStatus } from './types'
+import type { AgentStep, AgentStatusFeed, LiveToolDef, LiveMessage, LiveSessionState, ToolCall, ToolStatus } from './types'
 import { getLiveTool } from './liveTools'
 
 // ---- helpers ----
@@ -75,6 +75,9 @@ export class LiveAgent {
       isLoading: false,
       currentTurn: 0,
       error: null,
+      phase: 'plan',
+      hasPlan: false,
+      statusFeed: null,
     }
   }
 
@@ -108,6 +111,9 @@ export class LiveAgent {
       isLoading: false,
       currentTurn: 0,
       error: null,
+      phase: 'plan',
+      hasPlan: false,
+      statusFeed: null,
     }
     this.emit()
   }
@@ -187,7 +193,11 @@ export class LiveAgent {
     const { maxTurns } = this.config
 
     for (let turn = 0; turn < maxTurns; turn++) {
-      this.state = { ...this.state, currentTurn: turn + 1 }
+      this.state = {
+        ...this.state,
+        currentTurn: turn + 1,
+        statusFeed: this.buildStatusFeed(turn + 1),
+      }
       this.emit()
 
       // Build messages for LLM
@@ -199,6 +209,12 @@ export class LiveAgent {
       if (response.toolCalls && response.toolCalls.length > 0) {
         // LLM wants to call tools
         await this.handleToolCalls(response.toolCalls, response.content)
+        // Update status feed after tool execution
+        this.state = {
+          ...this.state,
+          statusFeed: this.buildStatusFeed(turn + 1),
+        }
+        this.emit()
         // Continue to next turn (tool results are in messages now)
       } else {
         // LLM gave final answer — done
@@ -210,6 +226,7 @@ export class LiveAgent {
             ...this.state.steps,
             makeStep('response', response.content),
           ],
+          statusFeed: this.buildStatusFeed(turn + 1),
         }
         this.emit()
         return
@@ -224,6 +241,7 @@ export class LiveAgent {
       messages: this.state.messages.map((m) =>
         m.isStreaming ? { ...m, isStreaming: false } : m,
       ),
+      statusFeed: null,
     }
     this.emit()
   }
@@ -269,7 +287,64 @@ export class LiveAgent {
       }
     }
 
-    return msgs
+    return normalizeToolAdjacency(msgs)
+  }
+
+  // ============================================================
+  // Internal: Filter tools by current phase
+  // ============================================================
+
+  private buildPhaseTools(): LiveToolDef[] {
+    if (!this.state.hasPlan) {
+      // PLAN 阶段：只暴露规划/读取工具
+      return this.tools.filter((t) => t.name === 'set_todos' || t.name === 'read_file')
+    }
+    // BUILD 阶段：全部工具
+    return this.tools
+  }
+
+  // ============================================================
+  // Internal: Build status feed for real-time Agent State panel
+  // ============================================================
+
+  private buildStatusFeed(loopCount: number): AgentStatusFeed {
+    // Derive file tree from tool call outputs that include file paths
+    const fileTree: Array<{ path: string; status: 'writing' | 'added' | 'modified' | 'unchanged' }> = []
+    for (const msg of this.state.messages) {
+      if (msg.role === 'tool' && msg.toolCallId) {
+        try {
+          const parsed = JSON.parse(msg.content)
+          if (typeof parsed === 'object' && parsed !== null) {
+            const path = parsed.file ?? parsed.path ?? parsed.filename
+            if (path && typeof path === 'string') {
+              const exists = fileTree.find((f) => f.path === path)
+              if (!exists) fileTree.push({ path, status: 'added' })
+            }
+          }
+        } catch { /* skip non-JSON */ }
+      }
+    }
+
+    // Build task list from tool calls in steps
+    const taskList: Array<{ name: string; status: 'pending' | 'running' | 'completed' | 'failed' }> = []
+    for (const step of this.state.steps) {
+      if (step.type === 'tool_call' && step.toolCall) {
+        const tc = step.toolCall
+        const name = `${tc.name}(${tryTruncateArgs(tc.input)})`
+        taskList.push({
+          name,
+          status: tc.status === 'success' ? 'completed' : tc.status === 'error' ? 'failed' : 'running',
+        })
+      }
+    }
+
+    return {
+      fileTree,
+      gitState: null, // playground 无真实 git
+      taskList,
+      loopCount,
+      linterActive: false,
+    }
   }
 
   // ============================================================
@@ -301,8 +376,8 @@ export class LiveAgent {
       headers.Authorization = `Bearer ${this.config.apiKey}`
     }
 
-    // Convert tools to OpenAI format
-    const openaiTools = this.tools.map((t) => ({
+    // Convert tools to OpenAI format (phase-filtered)
+    const openaiTools = this.buildPhaseTools().map((t) => ({
       type: 'function' as const,
       function: {
         name: t.name,
@@ -575,6 +650,16 @@ export class LiveAgent {
         }
       }
 
+      // Phase transition: set_todos success → PLAN → BUILD
+      if (tc.name === 'set_todos' && status === 'success') {
+        this.state = {
+          ...this.state,
+          hasPlan: true,
+          phase: 'build',
+        }
+        this.emit()
+      }
+
       // Update tool call step with result
       const updatedToolCall: ToolCall = {
         ...toolCall,
@@ -638,4 +723,37 @@ function tryTruncateArgs(args: string, maxLen = 40): string {
   } catch {
     return args.length > maxLen ? args.slice(0, maxLen) + '...' : args
   }
+}
+
+/**
+ * Tool Call 排序安全网
+ * 确保 assistant + tool_calls 后紧接对应的 role: tool results，
+ * 中间不能插入 system/user 消息，否则 API 返回 400。
+ * 用 FIFO queue 配对 tool_call_id，将非 tool 消息推迟到队列清空后再放。
+ */
+function normalizeToolAdjacency(
+  msgs: Array<{ role: string; content: string | null; tool_calls?: unknown[]; tool_call_id?: string }>,
+): Array<{ role: string; content: string | null; tool_calls?: unknown[]; tool_call_id?: string }> {
+  const result: typeof msgs = []
+  const pendingIds: string[] = []
+
+  for (const msg of msgs) {
+    if (msg.role === 'assistant' && msg.tool_calls?.length) {
+      result.push(msg)
+      for (const tc of msg.tool_calls as Array<{ id: string }>) {
+        if (tc.id) pendingIds.push(tc.id)
+      }
+    } else if (msg.role === 'tool') {
+      result.push(msg)
+      if (msg.tool_call_id) {
+        const idx = pendingIds.indexOf(msg.tool_call_id)
+        if (idx >= 0) pendingIds.splice(idx, 1)
+      }
+    } else if (pendingIds.length === 0) {
+      result.push(msg)
+    }
+    // pendingIds 非空时：system/user 被夹在 tool_calls 和 results 之间
+    // 跳过，等 pending 清空后再放入
+  }
+  return result
 }

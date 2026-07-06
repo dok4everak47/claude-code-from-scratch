@@ -130,6 +130,25 @@ export interface LiveSessionState {
   isLoading: boolean
   currentTurn: number
   error: string | null
+  /** 当前阶段: 'plan' | 'build' */
+  phase: 'plan' | 'build'
+  /** 是否已完成规划（有 set_todos 记录） */
+  hasPlan: boolean
+  /** 实时 Agent 状态推送 */
+  statusFeed: AgentStatusFeed | null
+}
+
+/** Real-time status feed pushed during agent execution */
+export interface AgentStatusFeed {
+  fileTree: Array<{ path: string; status: 'writing' | 'added' | 'modified' | 'unchanged' }>
+  gitState: {
+    branch: string
+    dirtyCount: number
+    recentCommit: string
+  } | null
+  taskList: Array<{ name: string; status: 'pending' | 'running' | 'completed' | 'failed' }>
+  loopCount: number
+  linterActive: boolean
 }
 
 /** Default initial live session state */
@@ -140,5 +159,8 @@ export function createLiveSessionState(): LiveSessionState {
     isLoading: false,
     currentTurn: 0,
     error: null,
+    phase: 'plan',
+    hasPlan: false,
+    statusFeed: null,
   }
 }

@@ -378,7 +378,6 @@ const searchHotel: LiveToolDef = {
 // ============================================================
 export const liveTools: LiveToolDef[] = [
   getWeather,
-  searchWeb,
   calculate,
   getTime,
   searchFlight,

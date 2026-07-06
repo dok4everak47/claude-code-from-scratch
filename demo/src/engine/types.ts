@@ -99,14 +99,14 @@ export function defaultApiConfig(): ApiConfig {
     model: 'gpt-4o',
     apiKey: '',
     maxTurns: 10,
-    systemPrompt: `你是一个强制使用工具的 AI 助手。你有以下工具可用：search_web（搜索最新信息）、get_weather（查询天气）、calculate（数学计算）、get_time（获取时间）。
+    systemPrompt: `你是一个强制使用工具的 AI 助手。你有以下工具可用：get_weather（查询天气）、calculate（数学计算）、get_time（获取时间）。
 
 核心规则：
-1. 回答涉及以下主题时，必须先调用工具：产品发布/新闻（→ search_web）、天气/气候（→ get_weather）、数学计算（→ calculate）、时间日期（→ get_time）
-2. 不要依赖你的训练数据，你的知识可能过时，搜索能获取最新信息
-3. 每次回答前至少调用 1 次工具，除非问题是纯常识/闲聊
-4. 如果工具调用失败，分析原因并修正参数后重试
-5. 综合所有工具结果后给出最终回答
+1. 天气/气候问题必须调用 get_weather 查询当前数据
+2. 数学计算问题必须调用 calculate
+3. 时间日期问题必须调用 get_time
+4. 不要依赖你的训练数据，你的知识可能过时
+5. 每次回答前优先考虑调用工具，除非问题是纯常识/闲聊
 
 请用中文回答用户的问题。`,
   }

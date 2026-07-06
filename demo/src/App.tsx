@@ -1267,7 +1267,7 @@ function ComparisonMetrics({ columns }: { columns: import('@/engine/comparisonAg
   const rows: Array<{ label: string; key: keyof import('@/engine/comparisonAgent').ColumnMetrics; format: (v: number | null) => string }> = [
     { label: '工具调用次数', key: 'toolCallCount', format: (v) => String(v ?? 0) },
     { label: '成功率', key: 'successRate', format: (v) => v != null ? `${Math.round(v * 100)}%` : '—' },
-    { label: '首次调工具耗时', key: 'firstToolLatency', format: (v) => v != null ? `${v.toFixed(1)}s` : '—' },
+    { label: '首次调工具耗时', key: 'firstToolLatency', format: (v) => v != null && Number.isFinite(v) ? `${v.toFixed(1)}s` : '—' },
     { label: '总运行时长', key: 'totalDuration', format: (v) => v != null ? `${v.toFixed(1)}s` : '—' },
     { label: '总步骤数', key: 'totalSteps', format: (v) => String(v ?? 0) },
   ]

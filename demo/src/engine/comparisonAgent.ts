@@ -277,7 +277,10 @@ export class ComparisonAgent {
         successRate: toolSteps.length > 0 ? successCount / toolSteps.length : 1,
         firstToolLatency:
           firstToolStep && col.startTime
-            ? (new Date(firstToolStep.timestamp).getTime() - col.startTime) / 1000
+            ? (() => {
+                const ts = new Date(firstToolStep.timestamp).getTime()
+                return Number.isFinite(ts) ? (ts - col.startTime) / 1000 : null
+              })()
             : null,
         totalDuration:
           col.endTime && col.startTime ? (col.endTime - col.startTime) / 1000 : 0,

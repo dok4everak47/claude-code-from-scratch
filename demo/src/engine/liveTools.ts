@@ -141,8 +141,8 @@ const searchWeb: LiveToolDef = {
     const num = Math.min(Number(args.num_results ?? 3), 5)
 
     try {
-      // 调用 Wikipedia REST API（免费，无需 API Key）
-      const url = `https://en.wikipedia.org/api/rest_v1/search/summary?q=${encodeURIComponent(query)}&limit=${num}`
+      // 调用 Wikipedia API（免费，无需 API Key）
+      const url = `https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(query)}&prop=extracts&exintro&explaintext&format=json&gsrlimit=${num}`
       const res = await fetch(url)
 
       if (!res.ok) {
@@ -156,15 +156,13 @@ const searchWeb: LiveToolDef = {
 
       const data = await res.json()
 
-      // 提取搜索结果
-      const pages = data.pages ?? []
+      // 提取搜索结果（Wikipedia API 返回 pages 对象，key 为 pageid）
+      const pagesObj: Record<string, Record<string, unknown>> = data?.query?.pages ?? {}
+      const pages = Object.values(pagesObj).sort((a, b) => (a.pageid as number) - (b.pageid as number))
       const results = pages.slice(0, num).map((page: Record<string, unknown>, i: number) => ({
-        title: page.title ?? `结果 ${i + 1}`,
-        snippet: (page.extract as string) ?? (page.description as string) ?? '',
-        url:
-          ((page.content_urls as Record<string, unknown>)?.desktop as Record<string, unknown>)?.page as string
-          ?? `https://en.wikipedia.org/wiki/${encodeURIComponent((page.title as string) ?? '')}`,
-        thumbnail: (page.thumbnail as Record<string, unknown>)?.source as string ?? null,
+        title: (page.title as string) ?? `结果 ${i + 1}`,
+        snippet: (page.extract as string) ?? '',
+        url: `https://en.wikipedia.org/wiki/${encodeURIComponent((page.title as string) ?? '')}`,
       }))
 
       return JSON.stringify({ query, results, searched_at: now() })

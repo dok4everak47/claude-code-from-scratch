@@ -202,6 +202,17 @@ export class LiveAgent {
 
       // Build messages for LLM
       const chatMessages = this.buildChatMessages()
+      
+      // DEBUG: 打印消息结构排查 400 错误
+      console.group('📤 Turn ' + (turn + 1))
+      chatMessages.forEach((m, i) => {
+        const ids = m.tool_calls
+          ? (m.tool_calls as Array<{ id: string }>).map(tc => tc.id).join(', ')
+          : m.tool_call_id || '-'
+        const preview = (m.content ?? '').toString().slice(0, 80)
+        console.log(`[${i}] ${m.role.padEnd(10)} ids: ${ids.padEnd(40)} content: "${preview}"`)
+      })
+      console.groupEnd()
 
       // Call LLM with streaming
       const response = await this.callLLM(chatMessages)

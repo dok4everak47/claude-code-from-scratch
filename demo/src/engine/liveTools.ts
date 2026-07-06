@@ -117,25 +117,6 @@ const getWeather: LiveToolDef = {
 // ============================================================
 // Tool: search_web
 // ============================================================
-const MOCK_SEARCH_RESULTS: Record<string, Array<{ title: string; snippet: string; url: string }>> = {
-  default: [
-    {
-      title: '搜索结果 1',
-      snippet: '这是关于该主题的详细介绍，包含最新的信息和分析...',
-      url: 'https://example.com/result-1',
-    },
-    {
-      title: '搜索结果 2',
-      snippet: '相关百科条目，涵盖历史背景、核心概念和发展趋势...',
-      url: 'https://example.com/result-2',
-    },
-    {
-      title: '搜索结果 3',
-      snippet: '最新的新闻报道和社区讨论，提供多角度的观点...',
-      url: 'https://example.com/result-3',
-    },
-  ],
-}
 
 const searchWeb: LiveToolDef = {
   name: 'search_web',
@@ -158,14 +139,43 @@ const searchWeb: LiveToolDef = {
     await delay()
     const query = String(args.query ?? '')
     const num = Math.min(Number(args.num_results ?? 3), 5)
-    const results = (MOCK_SEARCH_RESULTS[query] ?? MOCK_SEARCH_RESULTS.default)
-      .slice(0, num)
-      .map((r, i) => ({
-        ...r,
-        title: `${r.title} (关于"${query}")`,
-        relevance: Math.round((1 - i * 0.15) * 100) / 100,
+
+    try {
+      // 调用 Wikipedia REST API（免费，无需 API Key）
+      const url = `https://en.wikipedia.org/api/rest_v1/search/summary?q=${encodeURIComponent(query)}&limit=${num}`
+      const res = await fetch(url)
+
+      if (!res.ok) {
+        return JSON.stringify({
+          query,
+          error: `Wikipedia API error: ${res.status}`,
+          results: [],
+          searched_at: now(),
+        })
+      }
+
+      const data = await res.json()
+
+      // 提取搜索结果
+      const pages = data.pages ?? []
+      const results = pages.slice(0, num).map((page: Record<string, unknown>, i: number) => ({
+        title: page.title ?? `结果 ${i + 1}`,
+        snippet: (page.extract as string) ?? (page.description as string) ?? '',
+        url:
+          ((page.content_urls as Record<string, unknown>)?.desktop as Record<string, unknown>)?.page as string
+          ?? `https://en.wikipedia.org/wiki/${encodeURIComponent((page.title as string) ?? '')}`,
+        thumbnail: (page.thumbnail as Record<string, unknown>)?.source as string ?? null,
       }))
-    return JSON.stringify({ query, results, searched_at: now() })
+
+      return JSON.stringify({ query, results, searched_at: now() })
+    } catch (err) {
+      return JSON.stringify({
+        query,
+        error: err instanceof Error ? err.message : '搜索请求失败',
+        results: [],
+        searched_at: now(),
+      })
+    }
   },
 }
 

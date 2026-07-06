@@ -115,68 +115,6 @@ const getWeather: LiveToolDef = {
 }
 
 // ============================================================
-// Tool: search_web
-// ============================================================
-
-const searchWeb: LiveToolDef = {
-  name: 'search_web',
-  description: '搜索互联网获取相关信息，返回相关的网页摘要列表',
-  parameters: {
-    type: 'object',
-    properties: {
-      query: {
-        type: 'string',
-        description: '搜索关键词或问题',
-      },
-      num_results: {
-        type: 'number',
-        description: '需要的搜索结果数量，默认 3',
-      },
-    },
-    required: ['query'],
-  },
-  execute: async (args) => {
-    await delay()
-    const query = String(args.query ?? '')
-    const num = Math.min(Number(args.num_results ?? 3), 5)
-
-    try {
-      // 调用 Wikipedia API（免费，无需 API Key）
-      const url = `https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(query)}&prop=extracts&exintro&explaintext&format=json&gsrlimit=${num}&origin=*`
-      const res = await fetch(url)
-
-      if (!res.ok) {
-        return JSON.stringify({
-          query,
-          error: `Wikipedia API error: ${res.status}`,
-          results: [],
-          searched_at: now(),
-        })
-      }
-
-      const data = await res.json()
-
-      // 提取搜索结果（Wikipedia API 返回 pages 对象，key 为 pageid）
-      const pagesObj: Record<string, Record<string, unknown>> = data?.query?.pages ?? {}
-      const pages = Object.values(pagesObj).sort((a, b) => (a.pageid as number) - (b.pageid as number))
-      const results = pages.slice(0, num).map((page: Record<string, unknown>, i: number) => ({
-        title: (page.title as string) ?? `结果 ${i + 1}`,
-        snippet: (page.extract as string) ?? '',
-        url: `https://en.wikipedia.org/wiki/${encodeURIComponent((page.title as string) ?? '')}`,
-      }))
-
-      return JSON.stringify({ query, results, searched_at: now() })
-    } catch (err) {
-      return JSON.stringify({
-        query,
-        error: err instanceof Error ? err.message : '搜索请求失败',
-        results: [],
-        searched_at: now(),
-      })
-    }
-  },
-}
-
 // ============================================================
 // Tool: calculate
 // ============================================================

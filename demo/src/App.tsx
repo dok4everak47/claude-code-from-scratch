@@ -899,7 +899,11 @@ export default function App() {
                       输入问题并点击「运行」开始对比
                     </div>
                   ) : (
-                    <ComparisonSummary columns={comparisonState.columns} />
+                    <>
+                      <ComparisonMetrics columns={comparisonState.columns} />
+                      <div className="border-t border-slate-700/30 my-2" />
+                      <ComparisonSummary columns={comparisonState.columns} />
+                    </>
                   )}
                 </div>
               </footer>
@@ -1242,6 +1246,89 @@ function ComparisonSummaryFromHistory({ columns, userMessage }: {
   }
 
   return <div className="text-xs text-slate-400 leading-relaxed">{lines.map((l, i) => <div key={i} className="mt-0.5">{l}</div>)}</div>
+}
+
+// ============================================================
+// ComparisonMetrics — quantifiable metrics table
+// ============================================================
+
+function ComparisonMetrics({ columns }: { columns: import('@/engine/comparisonAgent').ComparisonColumnState[] }) {
+  // Find best values for highlighting
+  const maxCalls = Math.max(...columns.map((c) => c.metrics?.toolCallCount ?? 0))
+  const maxRate = Math.max(...columns.map((c) => c.metrics?.successRate ?? 1))
+  const minLatency = Math.min(
+    ...columns.map((c) => c.metrics?.firstToolLatency ?? Infinity),
+  )
+  const minDuration = Math.min(
+    ...columns.map((c) => c.metrics?.totalDuration ?? Infinity),
+  )
+  const maxSteps = Math.max(...columns.map((c) => c.metrics?.totalSteps ?? 0))
+
+  const rows: Array<{ label: string; key: keyof import('@/engine/comparisonAgent').ColumnMetrics; format: (v: number | null) => string }> = [
+    { label: '工具调用次数', key: 'toolCallCount', format: (v) => String(v ?? 0) },
+    { label: '成功率', key: 'successRate', format: (v) => v != null ? `${Math.round(v * 100)}%` : '—' },
+    { label: '首次调工具耗时', key: 'firstToolLatency', format: (v) => v != null ? `${v.toFixed(1)}s` : '—' },
+    { label: '总运行时长', key: 'totalDuration', format: (v) => v != null ? `${v.toFixed(1)}s` : '—' },
+    { label: '总步骤数', key: 'totalSteps', format: (v) => String(v ?? 0) },
+  ]
+
+  return (
+    <div className="text-xs">
+      <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">
+        📊 评测指标
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse">
+          <thead>
+            <tr className="border-b border-slate-700/30">
+              <th className="text-left py-1 pr-3 text-slate-500 font-medium w-32" />
+              {columns.map((col) => (
+                <th
+                  key={col.key}
+                  className="py-1 px-2 text-center font-medium"
+                >
+                  {col.key === 'default' ? '🟢' : col.key === 'aggressive' ? '🔴' : '🔵'}{' '}
+                  {col.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.key} className="border-b border-slate-700/20 last:border-0">
+                <td className="py-1 pr-3 text-slate-400">{row.label}</td>
+                {columns.map((col) => {
+                  const val = col.metrics?.[row.key]
+                  const display = row.format(val ?? null)
+                  // Determine if this value is the best in its row
+                  let isBest = false
+                  if (row.key === 'successRate') {
+                    isBest = val != null && val >= maxRate
+                  } else if (row.key === 'firstToolLatency') {
+                    isBest = val != null && val <= minLatency
+                  } else if (row.key === 'totalDuration') {
+                    isBest = val != null && val <= minDuration
+                  } else {
+                    isBest = val != null && val >= (row.key === 'toolCallCount' ? maxCalls : maxSteps)
+                  }
+                  return (
+                    <td
+                      key={col.key}
+                      className={`py-1 px-2 text-center font-mono ${
+                        isBest ? 'text-emerald-400 font-semibold' : 'text-slate-300'
+                      }`}
+                    >
+                      {display}
+                    </td>
+                  )
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
 }
 
 // ============================================================

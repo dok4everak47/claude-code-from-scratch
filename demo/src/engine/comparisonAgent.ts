@@ -53,6 +53,19 @@ export type ComparisonKey = (typeof COMPARISON_KEYS)[number]
 
 // ---- State ----
 
+export interface ColumnMetrics {
+  /** 工具调用次数 */
+  toolCallCount: number
+  /** 工具调用成功率（成功/总调用） */
+  successRate: number
+  /** 首次工具调用延迟（从 startTime 到第一个 tool_call 的时间差，秒） */
+  firstToolLatency: number | null
+  /** 总运行时长（秒） */
+  totalDuration: number
+  /** 总步骤数（thought + tool_call + response） */
+  totalSteps: number
+}
+
 export interface ComparisonColumnState {
   key: ComparisonKey
   label: string
@@ -63,6 +76,7 @@ export interface ComparisonColumnState {
   currentTurn: number
   startTime: number | null
   endTime: number | null
+  metrics: ColumnMetrics | null
 }
 
 export interface ComparisonState {
@@ -82,6 +96,7 @@ function createColumnState(key: ComparisonKey): ComparisonColumnState {
     currentTurn: 0,
     startTime: null,
     endTime: null,
+    metrics: null,
   }
 }
 
@@ -249,6 +264,27 @@ export class ComparisonAgent {
         endTime: this.state.columns[i].endTime ?? Date.now(),
       }
     }
+
+    // Calculate metrics for each column
+    for (let i = 0; i < this.state.columns.length; i++) {
+      const col = this.state.columns[i]
+      const toolSteps = col.steps.filter((s) => s.type === 'tool_call' && s.toolCall)
+      const successCount = toolSteps.filter((s) => s.toolCall?.status === 'success').length
+      const firstToolStep = toolSteps[0]
+
+      col.metrics = {
+        toolCallCount: toolSteps.length,
+        successRate: toolSteps.length > 0 ? successCount / toolSteps.length : 1,
+        firstToolLatency:
+          firstToolStep && col.startTime
+            ? (new Date(firstToolStep.timestamp).getTime() - col.startTime) / 1000
+            : null,
+        totalDuration:
+          col.endTime && col.startTime ? (col.endTime - col.startTime) / 1000 : 0,
+        totalSteps: col.steps.length,
+      }
+    }
+
     this.state.isRunning = false
     this.emit()
   }

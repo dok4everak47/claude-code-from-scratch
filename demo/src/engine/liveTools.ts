@@ -142,7 +142,7 @@ const searchWeb: LiveToolDef = {
 
     try {
       // 调用 Wikipedia API（免费，无需 API Key）
-      const url = `https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(query)}&prop=extracts&exintro&explaintext&format=json&gsrlimit=${num}`
+      const url = `https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(query)}&prop=extracts&exintro&explaintext&format=json&gsrlimit=${num}&origin=*`
       const res = await fetch(url)
 
       if (!res.ok) {

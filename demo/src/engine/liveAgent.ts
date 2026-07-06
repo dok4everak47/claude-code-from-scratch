@@ -76,7 +76,7 @@ export class LiveAgent {
       currentTurn: 0,
       error: null,
       phase: 'plan',
-      hasPlan: false,
+      hasPlan: true,
       statusFeed: null,
     }
   }
@@ -112,7 +112,7 @@ export class LiveAgent {
       currentTurn: 0,
       error: null,
       phase: 'plan',
-      hasPlan: false,
+      hasPlan: true,
       statusFeed: null,
     }
     this.emit()

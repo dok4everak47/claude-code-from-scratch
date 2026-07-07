@@ -136,7 +136,7 @@ export default function MultiAgentFlow({
   }
 
   return (
-    <div className="flex flex-col h-full min-h-0">
+    <div className="flex flex-col h-full min-h-0 w-full max-w-full">
       {/* === Tree Visualization === */}
       <div className="flex-1 overflow-y-auto overflow-x-hidden min-h-0 p-4">
         <TreeView

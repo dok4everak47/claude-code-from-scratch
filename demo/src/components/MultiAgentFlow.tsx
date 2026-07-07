@@ -407,7 +407,7 @@ function TreeView({
   const rootStatus = getNodeStatus(rootNode.id)
 
   return (
-    <div ref={containerRef} className="relative flex flex-col items-center pt-8 pb-8 w-full max-w-full min-h-[300px]">
+    <div ref={containerRef} className="relative flex flex-col items-center pt-8 pb-8 w-full max-w-full min-h-[300px] overflow-hidden">
       {/* SVG Connection Lines */}
       <svg
         className="absolute inset-0 pointer-events-none"

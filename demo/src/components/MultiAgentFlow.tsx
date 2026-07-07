@@ -12,6 +12,7 @@ import type {
   MultiAgentStatus,
 } from '@/engine/types'
 import type { MultiAgentEngineState } from '@/engine/types'
+import ThreeAgentScene from './ThreeAgentScene'
 
 // ============================================================
 // Status display config
@@ -73,6 +74,7 @@ export default function MultiAgentFlow({
   const isPlaying = engineState.isPlaying
 
   const [expandedNodeId, setExpandedNodeId] = useState<string | null>(null)
+  const [viewMode, setViewMode] = useState<'2d' | '3d'>('2d')
 
   const hasScenario = scenario !== null
   const canGoPrev = currentEventIndex >= 0
@@ -137,16 +139,26 @@ export default function MultiAgentFlow({
 
   return (
     <div className="flex flex-col h-full min-h-0 w-full max-w-full">
-      {/* === Tree Visualization === */}
-      <div className="flex-1 overflow-y-auto overflow-x-hidden min-h-0 p-4">
-        <TreeView
-          rootNode={rootNode}
-          childNodes={childNodes}
-          snapshot={snapshot}
-          expandedNodeId={expandedNodeId}
-          onNodeClick={handleNodeClick}
-          activeConnections={activeConnections}
-        />
+      {/* === Visualization: 2D Tree or 3D Scene === */}
+      <div className={`flex-1 min-h-0 ${viewMode === '3d' ? '' : 'overflow-y-auto overflow-x-hidden p-4'}`}>
+        {viewMode === '3d' ? (
+          <ThreeAgentScene
+            rootNode={rootNode}
+            childNodes={childNodes}
+            snapshot={snapshot}
+            onNodeClick={handleNodeClick}
+            activeConnections={activeConnections}
+          />
+        ) : (
+          <TreeView
+            rootNode={rootNode}
+            childNodes={childNodes}
+            snapshot={snapshot}
+            expandedNodeId={expandedNodeId}
+            onNodeClick={handleNodeClick}
+            activeConnections={activeConnections}
+          />
+        )}
       </div>
 
       {/* === Timeline === */}
@@ -232,6 +244,38 @@ export default function MultiAgentFlow({
             {isComplete && (
               <span className="text-xs font-semibold text-emerald-400">✓ 完成</span>
             )}
+          </div>
+
+          {/* 2D / 3D toggle */}
+          <div className="flex items-center gap-1 ml-4 bg-slate-800 rounded-lg p-0.5 border border-slate-700/50">
+            <button
+              type="button"
+              onClick={() => setViewMode('2d')}
+              className={`
+                px-2.5 py-1 text-xs font-medium rounded-md transition-all
+                ${viewMode === '2d'
+                  ? 'bg-slate-700 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+                }
+              `}
+              title="2D 树形视图"
+            >
+              2D
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('3d')}
+              className={`
+                px-2.5 py-1 text-xs font-medium rounded-md transition-all
+                ${viewMode === '3d'
+                  ? 'bg-slate-700 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+                }
+              `}
+              title="3D 场景视图"
+            >
+              3D
+            </button>
           </div>
         </div>
       </div>

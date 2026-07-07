@@ -358,7 +358,7 @@ function TreeView({
     const rootRect = rootRef.current.getBoundingClientRect()
 
     const rootX = rootRect.left - containerRect.left + rootRect.width / 2
-    const rootBottom = rootRect.bottom - containerRect.top + 8
+    const rootBottom = rootRect.bottom - containerRect.top + 16
 
     const lines: Array<{
       from: string
@@ -376,7 +376,7 @@ function TreeView({
 
       const childRect = childEl.getBoundingClientRect()
       const childX = childRect.left - containerRect.left + childRect.width / 2
-      const childTop = childRect.top - containerRect.top - 8
+      const childTop = childRect.top - containerRect.top - 12
 
       // Check connection state
       const connKey = `${rootNode?.id}→${child.id}`
@@ -443,7 +443,7 @@ function TreeView({
 
         {lineData.map((line) => {
           const midX = (line.x1 + line.x2) / 2
-          const midY = (line.y1 + line.y2) / 2 - 6
+          const midY = (line.y1 + line.y2) / 2 + 4
           const cpY = (line.y1 + line.y2) / 2
 
           const lineColor = line.newHighlight
@@ -505,7 +505,7 @@ function TreeView({
       </svg>
 
       {/* Nodes rendered on top of SVG */}
-      <div className="relative z-10 flex flex-col items-center gap-16">
+      <div className="relative z-10 flex flex-col items-center gap-20">
         {/* Root node */}
         <div ref={rootRef}>
           <AgentNodeCard

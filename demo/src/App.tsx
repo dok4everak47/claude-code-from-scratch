@@ -20,6 +20,8 @@ import type {
 } from '@/engine/types'
 import { createLiveSessionState, defaultApiConfig, createMultiAgentEngineState } from '@/engine/types'
 import { MultiAgentEngine } from '@/engine/multiAgentEngine'
+import { OrchestrationEngine } from '@/engine/orchestrationEngine'
+import type { LLMConfig } from '@/engine/llm'
 import MultiAgentFlow from '@/components/MultiAgentFlow'
 import { multiAgentScenarios } from '@/engine/multiAgentScenarios'
 import ChatPanel from '@/components/ChatPanel'
@@ -75,6 +77,12 @@ export default function App() {
   // ---- Multi-Agent mode state ----
   const [multiAgentState, setMultiAgentState] = useState<MultiAgentEngineState>(createMultiAgentEngineState())
   const multiAgentEngineRef = useRef<MultiAgentEngine | null>(null)
+  const [orchestrationState, setOrchestrationState] = useState<MultiAgentEngineState>(createMultiAgentEngineState())
+  const orchestrationEngineRef = useRef<OrchestrationEngine | null>(null)
+  const [multiAgentRunMode, setMultiAgentRunMode] = useState<'demo' | 'live'>('demo')
+  const [liveTask, setLiveTask] = useState('')
+  const [isOrchestrating, setIsOrchestrating] = useState(false)
+  const selectedScenarioRef = useRef<MultiAgentScenario | null>(null)
 
   // ---- History state ----
   const HISTORY_STORAGE_KEY = 'demo-comparison-history'
@@ -159,11 +167,18 @@ export default function App() {
     })
     multiAgentEngineRef.current = multiAgentEngine
 
+    // Real orchestration engine
+    const orchestrationEngine = new OrchestrationEngine({
+      onStateChange: (s) => setOrchestrationState(s),
+    })
+    orchestrationEngineRef.current = orchestrationEngine
+
     return () => {
       scenarioAgent.destroy()
       liveAgent.stop()
       comparisonAgent.stop()
       multiAgentEngine.destroy()
+      orchestrationEngine.destroy()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -357,14 +372,66 @@ export default function App() {
   // ============================================================
 
   const handleMultiAgentLoadScenario = useCallback((scenario: MultiAgentScenario) => {
-    multiAgentEngineRef.current?.loadScenario(scenario)
+    selectedScenarioRef.current = scenario
+    setLiveTask(scenario.description)
+    if (multiAgentRunMode === 'demo') {
+      multiAgentEngineRef.current?.loadScenario(scenario)
+    } else {
+      orchestrationEngineRef.current?.loadRoster(scenario)
+    }
+  }, [multiAgentRunMode])
+
+  const handleMultiAgentNext = useCallback(() => {
+    if (multiAgentRunMode === 'demo') multiAgentEngineRef.current?.next()
+    else orchestrationEngineRef.current?.next()
+  }, [multiAgentRunMode])
+  const handleMultiAgentPrev = useCallback(() => {
+    if (multiAgentRunMode === 'demo') multiAgentEngineRef.current?.prev()
+    else orchestrationEngineRef.current?.prev()
+  }, [multiAgentRunMode])
+  const handleMultiAgentPlay = useCallback(() => {
+    if (multiAgentRunMode === 'demo') multiAgentEngineRef.current?.play(2000)
+    else orchestrationEngineRef.current?.play(2000)
+  }, [multiAgentRunMode])
+  const handleMultiAgentPause = useCallback(() => {
+    if (multiAgentRunMode === 'demo') multiAgentEngineRef.current?.pause()
+    else orchestrationEngineRef.current?.pause()
+  }, [multiAgentRunMode])
+  const handleMultiAgentReset = useCallback(() => {
+    if (multiAgentRunMode === 'demo') multiAgentEngineRef.current?.reset()
+    else orchestrationEngineRef.current?.reset()
+  }, [multiAgentRunMode])
+
+  const switchMultiAgentRunMode = useCallback((m: 'demo' | 'live') => {
+    setMultiAgentRunMode(m)
+    const scenario = selectedScenarioRef.current
+    if (!scenario) return
+    if (m === 'demo') multiAgentEngineRef.current?.loadScenario(scenario)
+    else orchestrationEngineRef.current?.loadRoster(scenario)
   }, [])
 
-  const handleMultiAgentNext = useCallback(() => multiAgentEngineRef.current?.next(), [])
-  const handleMultiAgentPrev = useCallback(() => multiAgentEngineRef.current?.prev(), [])
-  const handleMultiAgentPlay = useCallback(() => multiAgentEngineRef.current?.play(2000), [])
-  const handleMultiAgentPause = useCallback(() => multiAgentEngineRef.current?.pause(), [])
-  const handleMultiAgentReset = useCallback(() => multiAgentEngineRef.current?.reset(), [])
+  const handleMultiAgentRun = useCallback(async () => {
+    const scenario = selectedScenarioRef.current
+    if (!scenario) return
+    const cfg: LLMConfig = {
+      apiKey: apiConfig.apiKey,
+      baseUrl: apiConfig.baseUrl,
+      model: apiConfig.model,
+      maxTurns: apiConfig.maxTurns,
+    }
+    orchestrationEngineRef.current?.loadRoster(scenario)
+    setIsOrchestrating(true)
+    try {
+      await orchestrationEngineRef.current?.run(cfg, liveTask)
+    } finally {
+      setIsOrchestrating(false)
+    }
+  }, [apiConfig, liveTask])
+
+  const handleMultiAgentStop = useCallback(() => {
+    orchestrationEngineRef.current?.stop()
+    setIsOrchestrating(false)
+  }, [])
 
   // ============================================================
   // Derived scenario state
@@ -518,10 +585,10 @@ export default function App() {
             </div>
           )}
 
-          {/* Multi-Agent scenario selector */}
+          {/* Multi-Agent scenario selector + run mode */}
           {mode === 'multiAgent' && (
-            <div className="flex-1 max-w-xl">
-              <div className="flex items-center gap-1.5">
+            <div className="flex-1 flex flex-col gap-2 min-w-0">
+              <div className="flex items-center gap-1.5 flex-wrap">
                 {multiAgentScenarios.map((s) => (
                   <button
                     key={s.id}
@@ -529,7 +596,7 @@ export default function App() {
                     onClick={() => handleMultiAgentLoadScenario(s)}
                     className={`
                       px-3 py-1.5 text-xs font-medium rounded-lg transition-all whitespace-nowrap
-                      ${multiAgentState.scenarioId === s.id
+                      ${(multiAgentRunMode === 'demo' ? multiAgentState.scenarioId : orchestrationState.scenarioId) === s.id
                         ? 'bg-violet-700 text-white shadow-sm'
                         : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
                       }
@@ -538,10 +605,55 @@ export default function App() {
                     {s.name}
                   </button>
                 ))}
-                {!multiAgentState.scenarioId && (
-                  <span className="text-xs text-slate-500 ml-1">选择场景开始</span>
-                )}
+                <div className="ml-2 inline-flex rounded-lg border border-slate-700 overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => switchMultiAgentRunMode('demo')}
+                    className={`px-3 py-1.5 text-xs font-medium ${multiAgentRunMode === 'demo' ? 'bg-slate-200 text-slate-900' : 'text-slate-300 hover:bg-slate-800'}`}
+                  >
+                    演示
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => switchMultiAgentRunMode('live')}
+                    className={`px-3 py-1.5 text-xs font-medium ${multiAgentRunMode === 'live' ? 'bg-emerald-600 text-white' : 'text-slate-300 hover:bg-slate-800'}`}
+                  >
+                    真实运行
+                  </button>
+                </div>
               </div>
+              {multiAgentRunMode === 'live' && (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={liveTask}
+                    onChange={(e) => setLiveTask(e.target.value)}
+                    placeholder="输入要编排的任务，或保留场景默认描述…"
+                    className="flex-1 min-w-0 bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-violet-500"
+                  />
+                  {isOrchestrating ? (
+                    <button
+                      type="button"
+                      onClick={handleMultiAgentStop}
+                      className="px-3 py-1.5 text-xs font-medium rounded-lg bg-red-600 hover:bg-red-500 text-white whitespace-nowrap"
+                    >
+                      ■ 停止
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleMultiAgentRun}
+                      disabled={!selectedScenarioRef.current || (!apiConfig.apiKey && !isDeployed)}
+                      className="px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      ▶ 运行
+                    </button>
+                  )}
+                  {!apiConfig.apiKey && !isDeployed && (
+                    <span className="text-[11px] text-amber-400 whitespace-nowrap">需在设置中配置 API Key</span>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1067,7 +1179,7 @@ export default function App() {
       {mode === 'multiAgent' && (
         <main className="flex-1 flex min-h-0">
           <MultiAgentFlow
-            engineState={multiAgentState}
+            engineState={multiAgentRunMode === 'demo' ? multiAgentState : orchestrationState}
             onNext={handleMultiAgentNext}
             onPrev={handleMultiAgentPrev}
             onPlay={handleMultiAgentPlay}

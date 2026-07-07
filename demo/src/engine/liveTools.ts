@@ -312,6 +312,212 @@ const searchHotel: LiveToolDef = {
 }
 
 // ============================================================
+// Tool: wikipedia_search
+// ============================================================
+const wikipediaSearch: LiveToolDef = {
+  name: 'wikipedia_search',
+  description: '搜索 Wikipedia 百科，查询概念、人物、事件等的详细解释',
+  parameters: {
+    type: 'object',
+    properties: {
+      query: {
+        type: 'string',
+        description: '要搜索的查询词，例如 "Transformer (machine learning)"、"Python"',
+      },
+    },
+    required: ['query'],
+  },
+  execute: async (args) => {
+    const query = String(args.query ?? '').trim()
+    if (!query) return JSON.stringify({ error: '查询词不能为空' })
+
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 10000)
+
+    try {
+      const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(query)}`
+      const res = await fetch(url, { signal: controller.signal })
+      if (!res.ok) {
+        if (res.status === 404) return JSON.stringify({ error: `在 Wikipedia 上未找到 "${query}" 的相关条目` })
+        throw new Error(`Wikipedia HTTP ${res.status}`)
+      }
+      const data = await res.json()
+      return JSON.stringify({
+        title: data.title,
+        extract: data.extract,
+        url: data.content_urls?.desktop?.page ?? `https://en.wikipedia.org/wiki/${encodeURIComponent(query)}`,
+      })
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return JSON.stringify({ error: 'Wikipedia 查询超时' })
+      }
+      return JSON.stringify({ error: `Wikipedia 查询失败: ${err instanceof Error ? err.message : '未知错误'}` })
+    } finally {
+      clearTimeout(timeout)
+    }
+  },
+}
+
+// ============================================================
+// Tool: get_exchange_rate
+// ============================================================
+const getExchangeRate: LiveToolDef = {
+  name: 'get_exchange_rate',
+  description: '查询实时汇率，支持任意两种货币之间的兑换率',
+  parameters: {
+    type: 'object',
+    properties: {
+      base: {
+        type: 'string',
+        description: '基础货币代码（3位大写），例如 "USD"、"EUR"、"CNY"、"JPY"',
+      },
+      target: {
+        type: 'string',
+        description: '目标货币代码（3位大写），例如 "CNY"、"USD"、"EUR"',
+      },
+    },
+    required: ['base', 'target'],
+  },
+  execute: async (args) => {
+    const base = String(args.base ?? '').toUpperCase().trim()
+    const target = String(args.target ?? '').toUpperCase().trim()
+    if (!base || !target) return JSON.stringify({ error: '货币代码不能为空' })
+    if (!/^[A-Z]{3}$/.test(base) || !/^[A-Z]{3}$/.test(target)) {
+      return JSON.stringify({ error: '货币代码格式错误，需要 3 位大写字母，例如 USD、EUR、CNY' })
+    }
+
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 10000)
+
+    try {
+      const url = `https://api.exchangerate-api.com/v4/latest/${base}`
+      const res = await fetch(url, { signal: controller.signal })
+      if (!res.ok) throw new Error(`汇率 API HTTP ${res.status}`)
+      const data = await res.json()
+
+      if (!data.rates || !data.rates[target]) {
+        return JSON.stringify({ error: `不支持 ${base} 到 ${target} 的汇率查询` })
+      }
+
+      return JSON.stringify({
+        base,
+        target,
+        rate: data.rates[target],
+        date: data.date,
+      })
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return JSON.stringify({ error: '汇率查询超时' })
+      }
+      return JSON.stringify({ error: `汇率查询失败: ${err instanceof Error ? err.message : '未知错误'}` })
+    } finally {
+      clearTimeout(timeout)
+    }
+  },
+}
+
+// ============================================================
+// Tool: get_definition
+// ============================================================
+const getDefinition: LiveToolDef = {
+  name: 'get_definition',
+  description: '查询英文单词的定义、发音、词性和例句',
+  parameters: {
+    type: 'object',
+    properties: {
+      word: {
+        type: 'string',
+        description: '要查询的英文单词，例如 "ephemeral"、"serendipity"',
+      },
+    },
+    required: ['word'],
+  },
+  execute: async (args) => {
+    const word = String(args.word ?? '').trim().toLowerCase()
+    if (!word) return JSON.stringify({ error: '单词不能为空' })
+
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 10000)
+
+    try {
+      const url = `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`
+      const res = await fetch(url, { signal: controller.signal })
+      if (!res.ok) {
+        if (res.status === 404) return JSON.stringify({ error: `未找到单词 "${word}" 的定义` })
+        throw new Error(`词典 API HTTP ${res.status}`)
+      }
+      const data = await res.json()
+      const entry = data[0]
+
+      const meanings = entry.meanings?.map((m: { partOfSpeech: string; definitions: Array<{ definition: string; example?: string }> }) => ({
+        partOfSpeech: m.partOfSpeech,
+        definition: m.definitions?.[0]?.definition ?? '',
+        example: m.definitions?.[0]?.example ?? null,
+      })) ?? []
+
+      return JSON.stringify({
+        word: entry.word,
+        phonetic: entry.phonetic ?? entry.phonetics?.[0]?.text ?? null,
+        meanings,
+      })
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return JSON.stringify({ error: '词典查询超时' })
+      }
+      return JSON.stringify({ error: `词典查询失败: ${err instanceof Error ? err.message : '未知错误'}` })
+    } finally {
+      clearTimeout(timeout)
+    }
+  },
+}
+
+// ============================================================
+// Tool: get_joke
+// ============================================================
+const getJoke: LiveToolDef = {
+  name: 'get_joke',
+  description: '讲个笑话，可选分类参数。支持分类：programming、general、dad、pun、spooky、christmas',
+  parameters: {
+    type: 'object',
+    properties: {
+      category: {
+        type: 'string',
+        description: '笑话分类，可选：programming、general、dad、pun、spooky、christmas。默认 random',
+      },
+    },
+  },
+  execute: async (args) => {
+    const category = String(args.category ?? '').trim().toLowerCase() || 'any'
+    const allowed = ['programming', 'general', 'dad', 'pun', 'spooky', 'christmas', 'any']
+    const cat = allowed.includes(category) ? category : 'Any'
+
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 10000)
+
+    try {
+      const url = `https://v2.jokeapi.dev/joke/${cat === 'any' ? 'Any' : cat}?type=single&safe-mode=true`
+      const res = await fetch(url, { signal: controller.signal })
+      if (!res.ok) throw new Error(`笑话 API HTTP ${res.status}`)
+      const data = await res.json()
+
+      if (data.error) return JSON.stringify({ error: data.message ?? '获取笑话失败' })
+
+      return JSON.stringify({
+        joke: data.joke ?? `${data.setup}\n${data.delivery}`,
+        category: data.category,
+      })
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return JSON.stringify({ error: '获取笑话超时' })
+      }
+      return JSON.stringify({ error: `获取笑话失败: ${err instanceof Error ? err.message : '未知错误'}` })
+    } finally {
+      clearTimeout(timeout)
+    }
+  },
+}
+
+// ============================================================
 // Registry
 // ============================================================
 export const liveTools: LiveToolDef[] = [
@@ -320,6 +526,10 @@ export const liveTools: LiveToolDef[] = [
   getTime,
   searchFlight,
   searchHotel,
+  wikipediaSearch,
+  getExchangeRate,
+  getDefinition,
+  getJoke,
 ]
 
 /** Look up a tool by name */

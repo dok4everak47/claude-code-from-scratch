@@ -169,7 +169,7 @@ function LiveChat({
             <span className="text-4xl">✨</span>
             <p className="text-sm">输入你的问题，Agent 将实时调用工具来回答</p>
             <div className="text-xs text-slate-600 max-w-xs text-center">
-              可用工具：天气查询、网页搜索、数学计算、时间查询、航班搜索、酒店搜索
+              可用工具：天气查询、Wikipedia 百科、汇率查询、词典查询、讲个笑话、数学计算、时间查询、航班搜索、酒店搜索
             </div>
           </div>
         ) : (
@@ -187,7 +187,7 @@ function LiveChat({
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="输入你的问题，例如：北京今天天气怎么样？"
+            placeholder="输入你的问题，例如：北京今天天气怎么样？Python 是什么？"
             rows={1}
             disabled={isLiveLoading}
             className="

@@ -126,13 +126,34 @@ export default function MultiAgentFlow({
 
   if (!hasScenario) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-slate-500 gap-4 p-8">
-        <span className="text-5xl">🤖</span>
-        <p className="text-sm text-slate-400 text-center">选择一个多 Agent 场景开始观察编排流程</p>
-        <p className="text-[11px] text-slate-600 text-center max-w-md">
-          多 Agent 编排展示了如何将复杂任务拆解为多个子任务，
-          由不同的专业 Agent 协作完成
-        </p>
+      <div className="flex flex-col items-center justify-center h-full min-h-[320px] p-8">
+        {/* Decorative container */}
+        <div className="relative flex flex-col items-center gap-5 px-10 py-8 rounded-2xl border border-slate-700/40 bg-slate-800/30 backdrop-blur-sm max-w-lg">
+          {/* Subtle glow ring */}
+          <div className="absolute inset-0 rounded-2xl bg-gradient-to-b from-blue-500/5 to-transparent pointer-events-none" />
+
+          {/* Icon area */}
+          <div className="relative flex items-center justify-center w-20 h-20 rounded-full bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700/50 shadow-lg shadow-slate-900/50">
+            <span className="text-4xl">🤖</span>
+            {/* Pulse ring */}
+            <span className="absolute inset-0 rounded-full border border-blue-500/20 animate-ping opacity-30" style={{ animationDuration: '3s' }} />
+          </div>
+
+          {/* Text content */}
+          <div className="flex flex-col items-center gap-2 text-center">
+            <h3 className="text-base font-semibold text-slate-200">选择一个多 Agent 场景</h3>
+            <p className="text-xs text-slate-400 leading-relaxed max-w-sm">
+              观察编排者（Coordinator）如何将复杂任务委派给专业 Agent，
+              并跟踪每一步的执行状态与消息流转
+            </p>
+          </div>
+
+          {/* Hint badge */}
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-700/50 border border-slate-600/30">
+            <span className="text-[10px] text-slate-400">💡</span>
+            <span className="text-[10px] text-slate-500">从上方工具栏选择场景开始</span>
+          </div>
+        </div>
       </div>
     )
   }

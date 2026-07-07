@@ -41,15 +41,15 @@ export interface StreamCallbacks {
 
 // ---- url / headers (mirrors liveAgent proxy logic) ----
 
-function resolveFetch(config: LLMConfig): { url: string; headers: Record<string, string> } {
+function resolveFetch(config: LLMConfig): { url: string; headers: Record<string, string>; useProxy: boolean } {
   const isProd = typeof import.meta !== 'undefined' && import.meta.env?.PROD === true
   const useProxy = isProd || (typeof window !== 'undefined' && !window.location.hostname.includes('localhost'))
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (useProxy) return { url: '/api/proxy', headers }
+  if (useProxy) return { url: '/api/proxy', headers, useProxy: true }
   let normalized = config.baseUrl.replace(/\/+$/, '')
   if (!normalized.endsWith('/chat/completions')) normalized += '/chat/completions'
   headers.Authorization = `Bearer ${config.apiKey}`
-  return { url: normalized, headers }
+  return { url: normalized, headers, useProxy: false }
 }
 
 // ============================================================
@@ -69,7 +69,7 @@ export async function streamChat(
   toolCalls: ParsedToolCall[] | null
   usage?: { prompt_tokens?: number; completion_tokens?: number }
 }> {
-  const { url, headers } = resolveFetch(config)
+  const { url, headers, useProxy } = resolveFetch(config)
 
   const openaiTools = tools.map((t) => ({
     type: 'function' as const,
@@ -87,6 +87,12 @@ export async function streamChat(
   }
   // DeepSeek / OpenAI return usage in the terminal chunk when this is set
   body.stream_options = { include_usage: true }
+  // When routed through our first-party proxy, hand over the target endpoint
+  // + key so the server can forward to the chosen (OpenAI-compatible) provider.
+  if (useProxy) {
+    body.baseUrl = config.baseUrl
+    if (config.apiKey) body.apiKey = config.apiKey
+  }
 
   const response = await fetch(url, {
     method: 'POST',

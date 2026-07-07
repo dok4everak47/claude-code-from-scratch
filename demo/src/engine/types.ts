@@ -83,7 +83,7 @@ export interface LiveToolDef {
 
 /** Persisted API configuration */
 export interface ApiConfig {
-  provider: 'openai' | 'anthropic' | 'custom'
+  provider: 'openai' | 'deepseek' | 'custom'
   baseUrl: string
   model: string
   apiKey: string
@@ -94,9 +94,9 @@ export interface ApiConfig {
 /** Default API config */
 export function defaultApiConfig(): ApiConfig {
   return {
-    provider: 'openai',
-    baseUrl: 'https://api.openai.com/v1',
-    model: 'gpt-4o',
+    provider: 'deepseek',
+    baseUrl: 'https://api.deepseek.com',
+    model: 'deepseek-v4-flash',
     apiKey: '',
     maxTurns: 10,
     systemPrompt: `你是一个强制使用工具的 AI 助手。你有以下工具可用：

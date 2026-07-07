@@ -395,6 +395,12 @@ export class LiveAgent {
       body.tools = openaiTools
       body.tool_choice = 'auto'
     }
+    // When routed through our first-party proxy, forward the chosen endpoint
+    // + key so the server can proxy to the configured provider.
+    if (useProxy) {
+      body.baseUrl = baseUrl
+      if (this.config.apiKey) body.apiKey = this.config.apiKey
+    }
 
     const response = await fetch(fetchUrl, {
       method: 'POST',

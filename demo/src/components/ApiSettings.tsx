@@ -9,7 +9,7 @@ import { defaultApiConfig } from '@/engine/types'
 const LS_KEY = 'agent-demo-api-config'
 const PROVIDER_PRESETS: Record<ApiConfig['provider'], { baseUrl: string; model: string }> = {
   openai: { baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o' },
-  anthropic: { baseUrl: 'https://api.anthropic.com/v1', model: 'claude-sonnet-4-20250514' },
+  deepseek: { baseUrl: 'https://api.deepseek.com', model: 'deepseek-v4-flash' },
   custom: { baseUrl: '', model: '' },
 }
 
@@ -151,7 +151,7 @@ export default function ApiSettings({ config, onChange, isOpen, onToggle }: ApiS
               className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
             >
               <option value="openai">OpenAI</option>
-              <option value="anthropic">Anthropic</option>
+              <option value="deepseek">DeepSeek</option>
               <option value="custom">Custom</option>
             </select>
           </div>
@@ -165,7 +165,7 @@ export default function ApiSettings({ config, onChange, isOpen, onToggle }: ApiS
               type="text"
               value={config.model}
               onChange={(e) => update({ model: e.target.value })}
-              placeholder="gpt-4o"
+              placeholder="deepseek-v4-flash"
               className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
             />
           </div>
@@ -179,9 +179,12 @@ export default function ApiSettings({ config, onChange, isOpen, onToggle }: ApiS
               type="text"
               value={config.baseUrl}
               onChange={(e) => update({ baseUrl: e.target.value })}
-              placeholder="https://api.openai.com/v1"
+              placeholder="https://api.deepseek.com"
               className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-sm text-slate-200 placeholder-slate-500 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500/50"
             />
+            <p className="text-[10px] text-slate-500 mt-1">
+              支持任何 OpenAI 兼容接口（OpenAI / DeepSeek / 通义千问 / Kimi / Gemini 等）。Claude 暂不支持。
+            </p>
           </div>
 
           {/* API Key */}

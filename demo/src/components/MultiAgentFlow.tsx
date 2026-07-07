@@ -20,12 +20,12 @@ import ThreeAgentScene from './ThreeAgentScene'
 
 const STATUS_CONFIG: Record<MultiAgentStatus, { icon: string; color: string; bgColor: string; label: string }> = {
   pending:     { icon: '⏳', color: 'text-slate-400', bgColor: 'bg-slate-800/60', label: '待命' },
-  running:     { icon: '🔄', color: 'text-blue-400', bgColor: 'bg-blue-900/20', label: '运行中' },
-  thinking:    { icon: '🤔', color: 'text-violet-400', bgColor: 'bg-violet-900/20', label: '思考中' },
-  using_tools: { icon: '🔧', color: 'text-yellow-400', bgColor: 'bg-yellow-900/20', label: '使用工具' },
+  running:     { icon: '🔄', color: 'text-blue-400', bgColor: 'bg-blue-900/40', label: '运行中' },
+  thinking:    { icon: '🤔', color: 'text-violet-400', bgColor: 'bg-violet-900/40', label: '思考中' },
+  using_tools: { icon: '🔧', color: 'text-yellow-400', bgColor: 'bg-yellow-900/40', label: '使用工具' },
   waiting:     { icon: '⏸', color: 'text-slate-400', bgColor: 'bg-slate-800/40', label: '等待' },
-  completed:   { icon: '✅', color: 'text-emerald-400', bgColor: 'bg-emerald-900/20', label: '完成' },
-  failed:      { icon: '❌', color: 'text-red-400', bgColor: 'bg-red-900/20', label: '失败' },
+  completed:   { icon: '✅', color: 'text-emerald-400', bgColor: 'bg-emerald-900/50', label: '完成' },
+  failed:      { icon: '❌', color: 'text-red-400', bgColor: 'bg-red-900/50', label: '失败' },
 }
 
 const ROLE_LABELS: Record<string, string> = {
@@ -336,6 +336,9 @@ function TreeView({
     const containerRect = containerRef.current.getBoundingClientRect()
     const rootRect = rootRef.current.getBoundingClientRect()
 
+    const rootX = rootRect.left - containerRect.left + rootRect.width / 2
+    const rootBottom = rootRect.bottom - containerRect.top + 8
+
     const lines: Array<{
       from: string
       to: string
@@ -346,16 +349,13 @@ function TreeView({
       labelType: string
     }> = []
 
-    const rootX = rootRect.left - containerRect.left + rootRect.width / 2
-    const rootBottom = rootRect.bottom - containerRect.top
-
     for (const child of childNodes) {
       const childEl = childRefs.current.get(child.id)
       if (!childEl) continue
 
       const childRect = childEl.getBoundingClientRect()
       const childX = childRect.left - containerRect.left + childRect.width / 2
-      const childTop = childRect.top - containerRect.top
+      const childTop = childRect.top - containerRect.top - 8
 
       // Check connection state
       const connKey = `${rootNode?.id}→${child.id}`
@@ -365,17 +365,12 @@ function TreeView({
       const highlighted = conn !== undefined
       const newHighlight = conn?.isNew ?? false
 
-      // Offset to avoid overlapping lines — alternate side anchor
-      const childIndex = childNodes.indexOf(child)
-      const totalChildren = childNodes.length
-      const xOffset = totalChildren > 1 ? (childIndex - (totalChildren - 1) / 2) * 0 : 0
-
       lines.push({
         from: rootNode?.id ?? '',
         to: child.id,
         x1: rootX,
         y1: rootBottom,
-        x2: childX + xOffset,
+        x2: childX,
         y2: childTop,
         highlighted,
         newHighlight,
@@ -385,7 +380,7 @@ function TreeView({
     }
 
     setLineData(lines)
-  }, [snapshot, rootNode, childNodes, activeConnections])
+  }, [snapshot, rootNode, childNodes, activeConnections, expandedNodeId])
 
   // Also measure on resize
   useEffect(() => {
@@ -407,7 +402,7 @@ function TreeView({
   const rootStatus = getNodeStatus(rootNode.id)
 
   return (
-    <div ref={containerRef} className="relative flex flex-col items-center pt-8 pb-8 w-full max-w-full min-h-[300px] overflow-hidden">
+    <div ref={containerRef} className="relative flex flex-col items-center pt-8 pb-8 w-full max-w-full min-h-[200px]">
       {/* SVG Connection Lines */}
       <svg
         className="absolute inset-0 pointer-events-none"
@@ -427,7 +422,7 @@ function TreeView({
 
         {lineData.map((line) => {
           const midX = (line.x1 + line.x2) / 2
-          const midY = (line.y1 + line.y2) / 2 - 16
+          const midY = (line.y1 + line.y2) / 2 - 6
           const cpY = (line.y1 + line.y2) / 2
 
           const lineColor = line.newHighlight
@@ -489,7 +484,7 @@ function TreeView({
       </svg>
 
       {/* Nodes rendered on top of SVG */}
-      <div className="relative z-10 flex flex-col items-center gap-8">
+      <div className="relative z-10 flex flex-col items-center gap-16">
         {/* Root node */}
         <div ref={rootRef}>
           <AgentNodeCard
@@ -502,7 +497,7 @@ function TreeView({
 
         {/* Children row */}
         {childNodes.length > 0 && (
-          <div className="flex justify-center gap-6 flex-nowrap">
+          <div className="flex justify-center gap-8 flex-nowrap">
             {childNodes.map((child) => {
               const childStatus = getNodeStatus(child.id)
               return (

@@ -363,11 +363,11 @@ function TreeView({
   const rootStatus = getNodeStatus(rootNode.id)
 
   return (
-    <div ref={containerRef} className="relative flex flex-col items-center min-h-[280px] pt-8">
+    <div ref={containerRef} className="relative flex flex-col items-center min-h-[280px] pt-8 overflow-hidden">
       {/* SVG Connection Lines */}
       <svg
         className="absolute inset-0 w-full h-full pointer-events-none"
-        style={{ zIndex: 0 }}
+        style={{ zIndex: 0, maxWidth: '100%' }}
       >
         <defs>
           <marker id="arrowhead-default" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">

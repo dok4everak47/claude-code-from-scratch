@@ -3,7 +3,7 @@
 //   [📋 场景模式] [✨ 自由模式] [🔬 对比模式] + [⚙️ API 设置]
 // ============================================================
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AgentLoop, createInitialState } from '@/engine/agent'
 import { LiveAgent } from '@/engine/liveAgent'
 import { ComparisonAgent, createComparisonState } from '@/engine/comparisonAgent'
@@ -21,6 +21,7 @@ import type {
 import { createLiveSessionState, defaultApiConfig, createMultiAgentEngineState } from '@/engine/types'
 import { MultiAgentEngine } from '@/engine/multiAgentEngine'
 import { OrchestrationEngine } from '@/engine/orchestrationEngine'
+import { estimateRunTokens, estimateRunCostUSD, formatCostCNY } from '@/engine/cost'
 import type { LLMConfig } from '@/engine/llm'
 import MultiAgentFlow from '@/components/MultiAgentFlow'
 import { multiAgentScenarios } from '@/engine/multiAgentScenarios'
@@ -82,7 +83,26 @@ export default function App() {
   const [multiAgentRunMode, setMultiAgentRunMode] = useState<'demo' | 'live'>('demo')
   const [liveTask, setLiveTask] = useState('')
   const [isOrchestrating, setIsOrchestrating] = useState(false)
+  const [selectedExperts, setSelectedExperts] = useState<string[]>([])
+  const [concurrency, setConcurrency] = useState(0)
+  const [maxRunTurns, setMaxRunTurns] = useState(4)
   const selectedScenarioRef = useRef<MultiAgentScenario | null>(null)
+
+  /** Specialist nodes of the currently-selected scenario (for the live toggle UI). */
+  const liveSpecialists = useMemo(() => {
+    const s = selectedScenarioRef.current
+    if (!s) return []
+    const coord = s.nodes.find((n) => n.role === 'orchestrator') ?? s.nodes[0]
+    return s.nodes.filter((n) => n.id !== coord.id)
+  }, [multiAgentRunMode, multiAgentState.scenarioId, orchestrationState.scenarioId])
+
+  /** Cost estimate for the current configuration (recomputed live). */
+  const runEstimate = useMemo(() => {
+    const enabled = liveSpecialists.filter((s) => selectedExperts.includes(s.id)).length
+    const count = enabled || liveSpecialists.length
+    const est = estimateRunTokens(count, maxRunTurns)
+    return { ...est, costCNY: formatCostCNY(estimateRunCostUSD(apiConfig.model || 'deepseek-chat', count, maxRunTurns)) }
+  }, [liveSpecialists, selectedExperts, maxRunTurns, apiConfig.model])
 
   // ---- History state ----
   const HISTORY_STORAGE_KEY = 'demo-comparison-history'
@@ -374,12 +394,19 @@ export default function App() {
   const handleMultiAgentLoadScenario = useCallback((scenario: MultiAgentScenario) => {
     selectedScenarioRef.current = scenario
     setLiveTask(scenario.description)
+    const coord = scenario.nodes.find((n) => n.role === 'orchestrator') ?? scenario.nodes[0]
+    const allSpecialists = scenario.nodes.filter((n) => n.id !== coord.id).map((n) => n.id)
+    setSelectedExperts(allSpecialists)
     if (multiAgentRunMode === 'demo') {
       multiAgentEngineRef.current?.loadScenario(scenario)
     } else {
-      orchestrationEngineRef.current?.loadRoster(scenario)
+      orchestrationEngineRef.current?.loadRoster(scenario, {
+        enabledExperts: allSpecialists,
+        concurrency,
+        maxTurns: maxRunTurns,
+      })
     }
-  }, [multiAgentRunMode])
+  }, [multiAgentRunMode, concurrency, maxRunTurns])
 
   const handleMultiAgentNext = useCallback(() => {
     if (multiAgentRunMode === 'demo') multiAgentEngineRef.current?.next()
@@ -407,8 +434,12 @@ export default function App() {
     const scenario = selectedScenarioRef.current
     if (!scenario) return
     if (m === 'demo') multiAgentEngineRef.current?.loadScenario(scenario)
-    else orchestrationEngineRef.current?.loadRoster(scenario)
-  }, [])
+    else orchestrationEngineRef.current?.loadRoster(scenario, {
+      enabledExperts: selectedExperts,
+      concurrency,
+      maxTurns: maxRunTurns,
+    })
+  }, [selectedExperts, concurrency, maxRunTurns])
 
   const handleMultiAgentRun = useCallback(async () => {
     const scenario = selectedScenarioRef.current
@@ -419,19 +450,64 @@ export default function App() {
       model: apiConfig.model,
       maxTurns: apiConfig.maxTurns,
     }
-    orchestrationEngineRef.current?.loadRoster(scenario)
+    orchestrationEngineRef.current?.loadRoster(scenario, {
+      enabledExperts: selectedExperts,
+      concurrency,
+      maxTurns: maxRunTurns,
+    })
     setIsOrchestrating(true)
     try {
       await orchestrationEngineRef.current?.run(cfg, liveTask)
     } finally {
       setIsOrchestrating(false)
     }
-  }, [apiConfig, liveTask])
+  }, [apiConfig, liveTask, selectedExperts, concurrency, maxRunTurns])
 
   const handleMultiAgentStop = useCallback(() => {
     orchestrationEngineRef.current?.stop()
     setIsOrchestrating(false)
   }, [])
+
+  /** Re-load the live roster with current expert/concurrency/turn config. */
+  const reconfigureOrchestration = useCallback(
+    (nextExperts: string[], nextConcurrency: number, nextTurns: number) => {
+      const scenario = selectedScenarioRef.current
+      if (!scenario || multiAgentRunMode !== 'live' || isOrchestrating) return
+      orchestrationEngineRef.current?.loadRoster(scenario, {
+        enabledExperts: nextExperts,
+        concurrency: nextConcurrency,
+        maxTurns: nextTurns,
+      })
+    },
+    [multiAgentRunMode, isOrchestrating],
+  )
+
+  const toggleExpert = useCallback(
+    (id: string) => {
+      const next = selectedExperts.includes(id)
+        ? selectedExperts.filter((x) => x !== id)
+        : [...selectedExperts, id]
+      setSelectedExperts(next)
+      reconfigureOrchestration(next, concurrency, maxRunTurns)
+    },
+    [selectedExperts, concurrency, maxRunTurns, reconfigureOrchestration],
+  )
+
+  const changeConcurrency = useCallback(
+    (c: number) => {
+      setConcurrency(c)
+      reconfigureOrchestration(selectedExperts, c, maxRunTurns)
+    },
+    [selectedExperts, maxRunTurns, reconfigureOrchestration],
+  )
+
+  const changeMaxTurns = useCallback(
+    (t: number) => {
+      setMaxRunTurns(t)
+      reconfigureOrchestration(selectedExperts, concurrency, t)
+    },
+    [selectedExperts, concurrency, reconfigureOrchestration],
+  )
 
   // ============================================================
   // Derived scenario state
@@ -623,14 +699,83 @@ export default function App() {
                 </div>
               </div>
               {multiAgentRunMode === 'live' && (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <input
                     type="text"
                     value={liveTask}
                     onChange={(e) => setLiveTask(e.target.value)}
                     placeholder="输入要编排的任务，或保留场景默认描述…"
-                    className="flex-1 min-w-0 bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-violet-500"
+                    className="flex-1 min-w-[200px] bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-violet-500"
                   />
+
+                  {/* Expert toggles */}
+                  {liveSpecialists.length > 0 && (
+                    <div className="inline-flex items-center gap-1 flex-wrap">
+                      <span className="text-[11px] text-slate-500">专家</span>
+                      {liveSpecialists.map((sp) => {
+                        const on = selectedExperts.includes(sp.id)
+                        return (
+                          <button
+                            key={sp.id}
+                            type="button"
+                            disabled={isOrchestrating}
+                            onClick={() => toggleExpert(sp.id)}
+                            className={`px-2 py-1 text-[11px] rounded-md border transition-all ${
+                              on
+                                ? 'bg-violet-700/80 text-white border-violet-500'
+                                : 'bg-slate-800 text-slate-500 border-slate-700 hover:border-slate-600'
+                            } disabled:opacity-50`}
+                          >
+                            {sp.name}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+
+                  {/* Concurrency */}
+                  <select
+                    value={concurrency}
+                    disabled={isOrchestrating}
+                    onChange={(e) => changeConcurrency(Number(e.target.value))}
+                    className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-violet-500 disabled:opacity-50"
+                  >
+                    <option value={0}>并发·全部</option>
+                    <option value={1}>并发·1</option>
+                    <option value={2}>并发·2</option>
+                    <option value={3}>并发·3</option>
+                  </select>
+
+                  {/* Max turns per worker */}
+                  <div className="inline-flex items-center gap-1">
+                    <span className="text-[11px] text-slate-500">轮次</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={12}
+                      value={maxRunTurns}
+                      disabled={isOrchestrating}
+                      onChange={(e) =>
+                        changeMaxTurns(Math.max(1, Math.min(12, Number(e.target.value) || 1)))
+                      }
+                      className="w-14 bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-violet-500 disabled:opacity-50"
+                    />
+                  </div>
+
+                  {/* Cost estimate (recomputed live) */}
+                  <span
+                    className="text-[11px] text-amber-300 whitespace-nowrap"
+                    title="粗略预估，实际以用量统计为准"
+                  >
+                    ≈ {runEstimate.promptTokens + runEstimate.completionTokens} tok · {runEstimate.costCNY}
+                  </span>
+                  {orchestrationState.usage &&
+                    orchestrationState.usage.promptTokens + orchestrationState.usage.completionTokens > 0 && (
+                      <span className="text-[11px] text-emerald-300 whitespace-nowrap">
+                        实测 {orchestrationState.usage.promptTokens + orchestrationState.usage.completionTokens} tok
+                      </span>
+                    )}
+
                   {isOrchestrating ? (
                     <button
                       type="button"

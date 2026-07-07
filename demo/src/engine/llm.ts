@@ -36,6 +36,7 @@ export interface StreamCallbacks {
   onReasoningDelta?: (delta: string) => void
   onToolCallStart?: (tc: { id: string; name: string; arguments: string }) => void
   onToolCallEnd?: (tc: ParsedToolCall) => void
+  onUsage?: (usage: { prompt_tokens?: number; completion_tokens?: number }) => void
 }
 
 // ---- url / headers (mirrors liveAgent proxy logic) ----
@@ -63,7 +64,11 @@ export async function streamChat(
   callbacks: StreamCallbacks,
   signal?: AbortSignal,
   opts?: { toolChoice?: 'auto' | 'required' },
-): Promise<{ content: string; toolCalls: ParsedToolCall[] | null }> {
+): Promise<{
+  content: string
+  toolCalls: ParsedToolCall[] | null
+  usage?: { prompt_tokens?: number; completion_tokens?: number }
+}> {
   const { url, headers } = resolveFetch(config)
 
   const openaiTools = tools.map((t) => ({
@@ -80,6 +85,8 @@ export async function streamChat(
     body.tools = openaiTools
     body.tool_choice = opts?.toolChoice ?? 'auto'
   }
+  // DeepSeek / OpenAI return usage in the terminal chunk when this is set
+  body.stream_options = { include_usage: true }
 
   const response = await fetch(url, {
     method: 'POST',
@@ -104,6 +111,7 @@ export async function streamChat(
   let accumulated = ''
   const calls = new Map<number, { id: string; name: string; arguments: string }>()
   let buffer = ''
+  let lastUsage: { prompt_tokens?: number; completion_tokens?: number } | undefined
 
   while (true) {
     const { done, value } = await reader.read()
@@ -121,6 +129,7 @@ export async function streamChat(
       try {
         const parsed = JSON.parse(dataStr)
         const choice = parsed.choices?.[0]
+        if (parsed.usage) lastUsage = parsed.usage
         if (!choice) continue
         const delta = choice.delta
         if (!delta) continue
@@ -182,7 +191,7 @@ export async function streamChat(
     toolCalls.push({ id: c.id, name: c.name, arguments: c.arguments, result, error })
   }
 
-  return { content: accumulated, toolCalls: toolCalls.length ? toolCalls : null }
+  return { content: accumulated, toolCalls: toolCalls.length ? toolCalls : null, usage: lastUsage }
 }
 
 // ============================================================
@@ -202,6 +211,7 @@ export async function runAgentLoop(opts: {
   onReasoning?: (delta: string) => void
   onToolStart?: (tc: { id: string; name: string; arguments: string }) => void
   onToolEnd?: (tc: ParsedToolCall) => void
+  onUsage?: (usage: { prompt_tokens?: number; completion_tokens?: number }) => void
 }): Promise<string> {
   const maxTurns = opts.maxTurns ?? 10
   const messages: ChatMessage[] = [
@@ -223,6 +233,7 @@ export async function runAgentLoop(opts: {
         onReasoningDelta: (d) => opts.onReasoning?.(d),
         onToolCallStart: (tc) => opts.onToolStart?.(tc),
         onToolCallEnd: (tc) => opts.onToolEnd?.(tc),
+        onUsage: (u) => opts.onUsage?.(u),
       },
       opts.signal,
     )

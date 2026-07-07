@@ -244,6 +244,8 @@ export interface MultiAgentEngineState {
   currentEventIndex: number
   totalEvents: number
   isPlaying: boolean
+  /** Real token usage accumulated during a live run (omitted by the scripted engine) */
+  usage?: { promptTokens: number; completionTokens: number }
 }
 
 /** Default initial multi-agent engine state */
@@ -255,6 +257,7 @@ export function createMultiAgentEngineState(): MultiAgentEngineState {
     currentEventIndex: -1,
     totalEvents: 0,
     isPlaying: false,
+    usage: { promptTokens: 0, completionTokens: 0 },
   }
 }
 

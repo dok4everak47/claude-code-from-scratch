@@ -38,13 +38,47 @@ function truncate(s: string, n = 48): string {
   return s.length > n ? s.slice(0, n) + '…' : s
 }
 
+/**
+ * Run `fn` over `items` with at most `limit` in flight.
+ * limit <= 0 => unbounded (equivalent to Promise.all).
+ */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length)
+  if (items.length === 0) return results
+  const effective = limit > 0 ? Math.min(limit, items.length) : items.length
+  let cursor = 0
+  const workers = new Array(effective).fill(0).map(async () => {
+    while (cursor < items.length) {
+      const i = cursor++
+      results[i] = await fn(items[i])
+    }
+  })
+  await Promise.all(workers)
+  return results
+}
+
 export interface OrchestrationCallbacks {
   onStateChange: (state: MultiAgentEngineState) => void
+}
+
+export interface OrchestrationOptions {
+  /** Only these specialist ids participate. Omit => all specialists. */
+  enabledExperts?: string[]
+  /** Max parallel workers. 0 (default) => run all concurrently. */
+  concurrency?: number
+  /** Max LLM turns per specialist worker. */
+  maxTurns?: number
 }
 
 export class OrchestrationEngine {
   private roster: MultiAgentScenario | null = null
   private liveScenario: MultiAgentScenario | null = null
+  /** Nodes (coordinator + enabled specialists) currently in play. */
+  private activeNodes: AgentNode[] = []
   private timeline: MultiAgentEvent[] = []
   private statuses: Record<string, MultiAgentStatus> = {}
   private activeMessages: AgentMessage[] = []
@@ -55,6 +89,13 @@ export class OrchestrationEngine {
   private abort: AbortController | null = null
   private onStateChange: (state: MultiAgentEngineState) => void
 
+  // run configuration
+  private enabledExperts?: string[] = undefined
+  private concurrency = 0
+  private maxTurns = 4
+  private usage: { promptTokens: number; completionTokens: number } = { promptTokens: 0, completionTokens: 0 }
+  private usageCb: (u: { prompt_tokens?: number; completion_tokens?: number }) => void = () => {}
+
   constructor(cb: OrchestrationCallbacks) {
     this.onStateChange = cb.onStateChange
   }
@@ -64,17 +105,30 @@ export class OrchestrationEngine {
   // ============================================================
 
   /** Load a scenario template as the agent roster (no execution yet) */
-  loadRoster(scenario: MultiAgentScenario): void {
+  loadRoster(scenario: MultiAgentScenario, opts?: OrchestrationOptions): void {
     this.stopPlay()
     this.roster = scenario
-    this.liveScenario = this.buildLiveScenario(scenario)
+    this.enabledExperts = opts?.enabledExperts
+    this.concurrency = opts?.concurrency ?? 0
+    this.maxTurns = opts?.maxTurns ?? 4
+    this.usage = { promptTokens: 0, completionTokens: 0 }
+
+    const coordinator =
+      scenario.nodes.find((n) => n.role === 'orchestrator') ?? scenario.nodes[0]
+    const specialists = scenario.nodes.filter((n) => n.id !== coordinator.id)
+    const enabled = specialists.filter(
+      (s) => !this.enabledExperts || this.enabledExperts.includes(s.id),
+    )
+    this.activeNodes = [coordinator, ...enabled]
+
+    this.liveScenario = this.buildLiveScenario(scenario, this.activeNodes)
     this.timeline = []
     this.statuses = {}
     this.activeMessages = []
     this.currentEventIndex = -1
     this.isPlaying = false
     this.isRunning = false
-    for (const n of scenario.nodes) this.statuses[n.id] = 'pending'
+    for (const n of this.activeNodes) this.statuses[n.id] = 'pending'
     this.emit()
   }
 
@@ -86,13 +140,18 @@ export class OrchestrationEngine {
     this.timeline = []
     this.activeMessages = []
     this.statuses = {}
-    for (const n of this.roster.nodes) this.statuses[n.id] = 'pending'
-    this.liveScenario = this.buildLiveScenario(this.roster)
+    this.usage = { promptTokens: 0, completionTokens: 0 }
+    this.usageCb = (u) => {
+      this.usage.promptTokens += u.prompt_tokens ?? 0
+      this.usage.completionTokens += u.completion_tokens ?? 0
+    }
+    for (const n of this.activeNodes) this.statuses[n.id] = 'pending'
+    this.liveScenario = this.buildLiveScenario(this.roster, this.activeNodes)
     this.currentEventIndex = -1
 
     const coordinator =
-      this.roster.nodes.find((n) => n.role === 'orchestrator') ?? this.roster.nodes[0]
-    const specialists = this.roster.nodes.filter((n) => n.id !== coordinator.id)
+      this.activeNodes.find((n) => n.role === 'orchestrator') ?? this.activeNodes[0]
+    const specialists = this.activeNodes.filter((n) => n.id !== coordinator.id)
 
     this.emit()
 
@@ -108,7 +167,7 @@ export class OrchestrationEngine {
       // 1) Coordinator decides delegation
       const delegations = await this.runCoordinatorDelegation(config, coordinator, specialists, task)
 
-      // 2) Specialists run concurrently
+      // 2) Specialists run (optionally with a concurrency limit)
       let results: { agentId: string; content: string }[] = []
       if (delegations.length === 0) {
         this.record({
@@ -126,8 +185,10 @@ export class OrchestrationEngine {
           description: '编排者选择直接作答',
         })
       } else {
-        const settled = await Promise.all(
-          delegations.map((d) => this.runWorker(config, coordinator, d)),
+        const settled = await mapWithConcurrency(
+          delegations,
+          this.concurrency,
+          (d) => this.runWorker(config, coordinator, d),
         )
         results = settled.filter((r): r is { agentId: string; content: string } => r !== null)
         // If some workers failed, still integrate what we have
@@ -207,11 +268,12 @@ export class OrchestrationEngine {
   reset(): void {
     this.stopPlay()
     if (this.roster) {
-      this.liveScenario = this.buildLiveScenario(this.roster)
+      this.liveScenario = this.buildLiveScenario(this.roster, this.activeNodes)
       this.timeline = []
       this.activeMessages = []
       this.statuses = {}
-      for (const n of this.roster.nodes) this.statuses[n.id] = 'pending'
+      this.usage = { promptTokens: 0, completionTokens: 0 }
+      for (const n of this.activeNodes) this.statuses[n.id] = 'pending'
     }
     this.currentEventIndex = -1
     this.isPlaying = false
@@ -242,6 +304,7 @@ export class OrchestrationEngine {
       currentEventIndex: this.currentEventIndex,
       totalEvents: this.timeline.length,
       isPlaying: this.isPlaying,
+      usage: { promptTokens: this.usage.promptTokens, completionTokens: this.usage.completionTokens },
     }
   }
 
@@ -296,7 +359,7 @@ ${specList}
         config,
         messages,
         [delegateTool],
-        { onTextDelta: () => {} },
+        { onTextDelta: () => {}, onUsage: this.usageCb },
         this.abort?.signal,
         { toolChoice: 'required' },
       )
@@ -371,8 +434,9 @@ ${specList}
         systemPrompt,
         task: delegation.task,
         tools: liveTools,
-        maxTurns: config.maxTurns ?? 10,
+        maxTurns: this.maxTurns,
         signal: this.abort?.signal,
+        onUsage: this.usageCb,
         onToolStart: (tc) => {
           this.setStatus(node.id, 'using_tools')
           this.pushStep(node.id, {
@@ -480,6 +544,7 @@ ${resultText}
         tools: [],
         maxTurns: 4,
         signal: this.abort?.signal,
+        onUsage: this.usageCb,
       })
     } catch (e) {
       if (e instanceof DOMException && e.name === 'AbortError') throw e
@@ -512,12 +577,12 @@ ${resultText}
   // Internal: state recording + snapshot
   // ============================================================
 
-  private buildLiveScenario(r: MultiAgentScenario): MultiAgentScenario {
+  private buildLiveScenario(r: MultiAgentScenario, nodes: AgentNode[]): MultiAgentScenario {
     return {
       id: r.id,
       name: r.name,
       description: r.description,
-      nodes: r.nodes.map((n) => ({ ...n, steps: [], messages: [] })),
+      nodes: nodes.map((n) => ({ ...n, steps: [], messages: [] })),
       timeline: [],
     }
   }

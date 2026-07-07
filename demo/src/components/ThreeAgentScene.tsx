@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
 import type { ThreeEvent } from '@react-three/fiber'
-import { OrbitControls, Text, Line } from '@react-three/drei'
+import { OrbitControls, Text } from '@react-three/drei'
 import * as THREE from 'three'
 import type {
   AgentNode,
@@ -343,35 +343,19 @@ function ConnectionLine({
   isActive: boolean
   isNew: boolean
 }) {
-  const [curve, points] = useMemo(() => {
+  const tubeGeo = useMemo(() => {
     const mid = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5)
     mid.y = -0.7 + Math.abs(end.x - start.x) * 0.3
     const c = new THREE.QuadraticBezierCurve3(start, mid, end)
-    return [c, c.getPoints(24)]
+    return new THREE.TubeGeometry(c, 16, 0.025, 8, false)
   }, [start, end])
 
   const color = isNew ? '#60a5fa' : isActive ? '#10b981' : '#334155'
-  const opacity = isActive ? 0.8 : 0.3
 
-  // Active connections use tube geometry for glow
-  if (isActive) {
-    const tubeGeo = useMemo(() => new THREE.TubeGeometry(curve, 16, 0.025, 8, false), [curve])
-    return (
-      <mesh geometry={tubeGeo}>
-        <meshBasicMaterial color={color} transparent opacity={isNew ? 0.7 : 0.4} depthWrite={false} />
-      </mesh>
-    )
-  }
-
-  // Inactive lines — use Line from drei
   return (
-    <Line
-      points={points}
-      color={color}
-      lineWidth={1}
-      transparent
-      opacity={opacity}
-    />
+    <mesh geometry={tubeGeo}>
+      <meshBasicMaterial color={color} transparent opacity={isActive ? (isNew ? 0.7 : 0.4) : 0.2} depthWrite={false} />
+    </mesh>
   )
 }
 

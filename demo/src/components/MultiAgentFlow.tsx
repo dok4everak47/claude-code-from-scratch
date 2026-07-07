@@ -354,9 +354,13 @@ function TreeView({
     return () => ro.disconnect()
   }, [])
 
-  if (!rootNode || !snapshot) return null
+  if (!rootNode) return null
 
-  const rootStatus = snapshot.nodeStatuses[rootNode.id] ?? 'pending'
+  const getNodeStatus = (nodeId: string): MultiAgentStatus => {
+    return snapshot?.nodeStatuses[nodeId] ?? 'pending'
+  }
+
+  const rootStatus = getNodeStatus(rootNode.id)
 
   return (
     <div ref={containerRef} className="relative flex flex-col items-center min-h-[280px] pt-8">
@@ -456,7 +460,7 @@ function TreeView({
         {childNodes.length > 0 && (
           <div className="flex justify-center gap-6">
             {childNodes.map((child) => {
-              const childStatus = snapshot.nodeStatuses[child.id] ?? 'pending'
+              const childStatus = getNodeStatus(child.id)
               return (
                 <div key={child.id} ref={setChildRef(child.id)}>
                   <AgentNodeCard

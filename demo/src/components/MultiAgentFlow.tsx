@@ -138,7 +138,7 @@ export default function MultiAgentFlow({
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* === Tree Visualization === */}
-      <div className="flex-1 overflow-y-auto min-h-0 p-4">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden min-h-0 p-4">
         <TreeView
           rootNode={rootNode}
           childNodes={childNodes}
@@ -363,11 +363,11 @@ function TreeView({
   const rootStatus = getNodeStatus(rootNode.id)
 
   return (
-    <div ref={containerRef} className="relative flex flex-col items-center min-h-[280px] pt-8 overflow-hidden">
+    <div ref={containerRef} className="relative flex flex-col items-center min-h-[280px] pt-8 overflow-hidden w-full max-w-full">
       {/* SVG Connection Lines */}
       <svg
-        className="absolute inset-0 w-full h-full pointer-events-none"
-        style={{ zIndex: 0, maxWidth: '100%' }}
+        className="absolute inset-0 pointer-events-none"
+        style={{ zIndex: 0, width: '100%', height: '100%' }}
       >
         <defs>
           <marker id="arrowhead-default" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">

@@ -57,9 +57,19 @@ export interface RunEstimate {
 export function estimateRunTokens(
   expertCount: number,
   maxTurns: number,
+  topology: 'fan-out' | 'debate' | 'pipeline' = 'fan-out',
 ): RunEstimate {
   const turns = Math.max(1, maxTurns)
-  const calls = 1 + expertCount * turns + 2
+  let calls: number
+  if (topology === 'debate') {
+    // 2 debaters: opening + (critique/rebuttal) per round, plus coordinator setup + judge
+    const debaters = Math.min(expertCount, 2)
+    const rounds = 2
+    calls = 1 + debaters * (1 + 2 * rounds) + 1
+  } else {
+    // fan-out & pipeline: coordinator delegates + each specialist up to `turns` + coordinator integrates
+    calls = 1 + expertCount * turns + 2
+  }
   const promptTokens = Math.round(calls * 600 + expertCount * turns * 250)
   const completionTokens = Math.round(calls * 350)
   return { calls, promptTokens, completionTokens }
@@ -69,8 +79,9 @@ export function estimateRunCostUSD(
   model: string,
   expertCount: number,
   maxTurns: number,
+  topology: 'fan-out' | 'debate' | 'pipeline' = 'fan-out',
 ): number {
-  const { promptTokens, completionTokens } = estimateRunTokens(expertCount, maxTurns)
+  const { promptTokens, completionTokens } = estimateRunTokens(expertCount, maxTurns, topology)
   const p = getModelPricing(model)
   return (promptTokens / 1e6) * p.in + (completionTokens / 1e6) * p.out
 }

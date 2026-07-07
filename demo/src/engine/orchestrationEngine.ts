@@ -65,6 +65,9 @@ export interface OrchestrationCallbacks {
   onStateChange: (state: MultiAgentEngineState) => void
 }
 
+/** Orchestration topology for a live run. */
+export type Topology = 'fan-out' | 'debate' | 'pipeline'
+
 export interface OrchestrationOptions {
   /** Only these specialist ids participate. Omit => all specialists. */
   enabledExperts?: string[]
@@ -72,6 +75,8 @@ export interface OrchestrationOptions {
   concurrency?: number
   /** Max LLM turns per specialist worker. */
   maxTurns?: number
+  /** Orchestration topology. Default 'fan-out'. */
+  topology?: Topology
 }
 
 export class OrchestrationEngine {
@@ -93,6 +98,8 @@ export class OrchestrationEngine {
   private enabledExperts?: string[] = undefined
   private concurrency = 0
   private maxTurns = 4
+  private topology: Topology = 'fan-out'
+  private debateRounds = 2
   private usage: { promptTokens: number; completionTokens: number } = { promptTokens: 0, completionTokens: 0 }
   private usageCb: (u: { prompt_tokens?: number; completion_tokens?: number }) => void = () => {}
 
@@ -111,6 +118,7 @@ export class OrchestrationEngine {
     this.enabledExperts = opts?.enabledExperts
     this.concurrency = opts?.concurrency ?? 0
     this.maxTurns = opts?.maxTurns ?? 4
+    this.topology = opts?.topology ?? 'fan-out'
     this.usage = { promptTokens: 0, completionTokens: 0 }
 
     const coordinator =
@@ -160,42 +168,17 @@ export class OrchestrationEngine {
         type: 'agent_spawn',
         agentId: coordinator.id,
         data: { status: 'running' },
-        description: `${coordinator.name} 开始分析任务`,
+        description: `${coordinator.name} 开始分析任务（${this.topologyName()}）`,
       })
       this.setStatus(coordinator.id, 'thinking')
 
-      // 1) Coordinator decides delegation
-      const delegations = await this.runCoordinatorDelegation(config, coordinator, specialists, task)
-
-      // 2) Specialists run (optionally with a concurrency limit)
-      let results: { agentId: string; content: string }[] = []
-      if (delegations.length === 0) {
-        this.record({
-          type: 'message_send',
-          data: {
-            message: {
-              id: uid('m'),
-              from: coordinator.id,
-              to: 'user',
-              content: '（编排者未委派，直接作答）',
-              type: 'response',
-              timestamp: ts(),
-            },
-          },
-          description: '编排者选择直接作答',
-        })
+      if (this.topology === 'debate') {
+        await this.runDebate(config, coordinator, specialists, task)
+      } else if (this.topology === 'pipeline') {
+        await this.runPipeline(config, coordinator, specialists, task)
       } else {
-        const settled = await mapWithConcurrency(
-          delegations,
-          this.concurrency,
-          (d) => this.runWorker(config, coordinator, d),
-        )
-        results = settled.filter((r): r is { agentId: string; content: string } => r !== null)
-        // If some workers failed, still integrate what we have
+        await this.runFanOut(config, coordinator, specialists, task)
       }
-
-      // 3) Coordinator integrates results into final answer
-      await this.runCoordinatorFinal(config, coordinator, task, results)
       this.setStatus(coordinator.id, 'completed')
     } catch (e) {
       if (e instanceof DOMException && e.name === 'AbortError') {
@@ -571,6 +554,231 @@ ${resultText}
       },
       description: '编排者给出最终答复',
     })
+  }
+
+  // ============================================================
+  // Internal: Fan-out topology (original behavior)
+  // ============================================================
+
+  private async runFanOut(
+    config: LLMConfig,
+    coordinator: AgentNode,
+    specialists: AgentNode[],
+    task: string,
+  ): Promise<void> {
+    // 1) Coordinator decides delegation
+    const delegations = await this.runCoordinatorDelegation(config, coordinator, specialists, task)
+
+    // 2) Specialists run (optionally with a concurrency limit)
+    let results: { agentId: string; content: string }[] = []
+    if (delegations.length === 0) {
+      this.record({
+        type: 'message_send',
+        data: {
+          message: {
+            id: uid('m'),
+            from: coordinator.id,
+            to: 'user',
+            content: '（编排者未委派，直接作答）',
+            type: 'response',
+            timestamp: ts(),
+          },
+        },
+        description: '编排者选择直接作答',
+      })
+    } else {
+      const settled = await mapWithConcurrency(
+        delegations,
+        this.concurrency,
+        (d) => this.runWorker(config, coordinator, d),
+      )
+      results = settled.filter((r): r is { agentId: string; content: string } => r !== null)
+    }
+
+    // 3) Coordinator integrates results into final answer
+    await this.runCoordinatorFinal(config, coordinator, task, results)
+  }
+
+  // ============================================================
+  // Internal: Debate topology (two experts exchange rounds)
+  // ============================================================
+
+  private topologyName(): string {
+    return this.topology === 'debate' ? '辩论模式' : this.topology === 'pipeline' ? '流水线模式' : '扇出模式'
+  }
+
+  private async runDebate(
+    config: LLMConfig,
+    coordinator: AgentNode,
+    specialists: AgentNode[],
+    task: string,
+  ): Promise<void> {
+    const debaters = specialists.length > 2 ? specialists.slice(0, 2) : specialists
+    if (debaters.length < 2) {
+      // Not enough participants — fall back to fan-out.
+      await this.runFanOut(config, coordinator, specialists, task)
+      return
+    }
+    const [a, b] = debaters
+    const transcript: { speaker: string; text: string }[] = []
+
+    this.record({
+      type: 'agent_status_change',
+      agentId: coordinator.id,
+      data: { status: 'thinking' },
+      description: `${coordinator.name} 组织辩论：${a.name} ⇄ ${b.name}`,
+    })
+
+    // Opening positions
+    this.setStatus(a.id, 'thinking'); this.setStatus(b.id, 'waiting')
+    const openA = await this.runDebaterTurn(config, a, task, transcript, `请就以下议题给出你的开场立场与论证：${task}`)
+    transcript.push({ speaker: a.name, text: openA })
+    this.pushStep(a.id, { id: uid('step'), type: 'response', content: openA, timestamp: ts() })
+    this.record({ type: 'message_send', data: { message: { id: uid('m'), from: a.id, to: b.id, content: openA, type: 'response', timestamp: ts() } }, description: `${a.name} 开场立场` })
+    this.setStatus(a.id, 'completed')
+
+    this.setStatus(b.id, 'thinking'); this.setStatus(a.id, 'waiting')
+    const openB = await this.runDebaterTurn(config, b, task, transcript, `这是 ${a.name} 的立场。请提出你的不同观点并给出论证（保持简洁）。`)
+    transcript.push({ speaker: b.name, text: openB })
+    this.pushStep(b.id, { id: uid('step'), type: 'response', content: openB, timestamp: ts() })
+    this.record({ type: 'message_send', data: { message: { id: uid('m'), from: b.id, to: a.id, content: openB, type: 'question', timestamp: ts() } }, description: `${b.name} 反驳` })
+    this.setStatus(b.id, 'completed')
+
+    // Rounds of critique / rebuttal
+    for (let r = 1; r <= this.debateRounds; r++) {
+      this.setStatus(a.id, 'thinking'); this.setStatus(b.id, 'waiting')
+      const rebA = await this.runDebaterTurn(config, a, task, transcript, `第 ${r} 轮：${b.name} 刚才反驳了你。请针对性地回应、捍卫或修正你的立场。`)
+      transcript.push({ speaker: a.name, text: rebA })
+      this.pushStep(a.id, { id: uid('step'), type: 'response', content: rebA, timestamp: ts() })
+      this.record({ type: 'message_send', data: { message: { id: uid('m'), from: a.id, to: b.id, content: rebA, type: 'question', timestamp: ts() } }, description: `${a.name} 第${r}轮回应` })
+      this.setStatus(a.id, 'completed')
+
+      this.setStatus(b.id, 'thinking'); this.setStatus(a.id, 'waiting')
+      const rebB = await this.runDebaterTurn(config, b, task, transcript, `第 ${r} 轮：${a.name} 作出了回应。请评估其论证并给出你的总结性观点。`)
+      transcript.push({ speaker: b.name, text: rebB })
+      this.pushStep(b.id, { id: uid('step'), type: 'response', content: rebB, timestamp: ts() })
+      this.record({ type: 'message_send', data: { message: { id: uid('m'), from: b.id, to: a.id, content: rebB, type: 'question', timestamp: ts() } }, description: `${b.name} 第${r}轮总结` })
+      this.setStatus(b.id, 'completed')
+    }
+
+    // Coordinator judges / synthesizes
+    this.setStatus(a.id, 'waiting'); this.setStatus(b.id, 'waiting')
+    await this.runCoordinatorJudge(config, coordinator, task, transcript.map((t) => `${t.speaker}：${t.text}`).join('\n\n'))
+  }
+
+  private async runDebaterTurn(
+    config: LLMConfig,
+    debater: AgentNode,
+    task: string,
+    transcript: { speaker: string; text: string }[],
+    instruction: string,
+  ): Promise<string> {
+    const transcriptText = transcript.length
+      ? transcript.map((t) => `${t.speaker}：${t.text}`).join('\n\n')
+      : '（尚无交锋记录）'
+    const systemPrompt = `你是多 Agent 辩论系统中的专家【${debater.name}】。
+角色：${debater.description}
+
+你们正在就一个议题展开辩论，目标是逼近更优结论。以下是目前的交锋记录：
+${transcriptText}
+
+你的任务：${instruction}
+要求：有理有据、立场鲜明、简洁（不超过 300 字）。`
+
+    try {
+      return await runAgentLoop({
+        config,
+        systemPrompt,
+        task: `议题：${task}`,
+        tools: liveTools,
+        maxTurns: Math.min(this.maxTurns, 3),
+        signal: this.abort?.signal,
+        onUsage: this.usageCb,
+      })
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') throw e
+      this.record({ type: 'agent_fail', agentId: debater.id, description: `${debater.name} 辩论出错：${e instanceof Error ? e.message : e}` })
+      this.setStatus(debater.id, 'failed')
+      return '（发言失败）'
+    }
+  }
+
+  private async runCoordinatorJudge(
+    config: LLMConfig,
+    coordinator: AgentNode,
+    task: string,
+    transcriptText: string,
+  ): Promise<void> {
+    const systemPrompt = `你是多 Agent 系统的【编排者 / 裁判】${coordinator.name}。
+${coordinator.description}
+
+两位专家就议题展开了辩论，以下是完整交锋记录：
+${transcriptText}
+
+请作为裁判整合双方论点，给出一份连贯、平衡、面向用户的最终答复（可指出双方优劣、给出你的结论）。`
+
+    const userMsg = `用户原始议题：\n${task}\n\n请输出最终整合答复。`
+    let final = ''
+    try {
+      final = await runAgentLoop({
+        config,
+        systemPrompt,
+        task: userMsg,
+        tools: [],
+        maxTurns: 4,
+        signal: this.abort?.signal,
+        onUsage: this.usageCb,
+      })
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') throw e
+      final = '（裁判阶段出错，但辩论记录已完成。）'
+    }
+    this.pushStep(coordinator.id, { id: uid('step'), type: 'response', content: final, timestamp: ts() })
+    this.record({
+      type: 'message_send',
+      data: {
+        message: { id: uid('m'), from: coordinator.id, to: 'user', content: final, type: 'response', timestamp: ts() },
+      },
+      description: '编排者给出最终裁定',
+    })
+  }
+
+  // ============================================================
+  // Internal: Pipeline topology (sequential specialists)
+  // ============================================================
+
+  private async runPipeline(
+    config: LLMConfig,
+    coordinator: AgentNode,
+    specialists: AgentNode[],
+    task: string,
+  ): Promise<void> {
+    if (specialists.length === 0) {
+      await this.runCoordinatorFinal(config, coordinator, task, [])
+      return
+    }
+    const results: { agentId: string; content: string }[] = []
+    let acc = ''
+    for (let i = 0; i < specialists.length; i++) {
+      const sp = specialists[i]
+      const stageTask =
+        i === 0
+          ? task
+          : `${task}\n\n——前序环节产出（请在其基础上继续）——
+${acc}`
+      this.record({
+        type: 'agent_status_change',
+        agentId: coordinator.id,
+        data: { status: 'thinking' },
+        description: `${coordinator.name} 流水线第 ${i + 1}/${specialists.length} 环：${sp.name}`,
+      })
+      const out = await this.runWorker(config, coordinator, { agentId: sp.id, task: stageTask })
+      if (out) {
+        results.push(out)
+        acc += `\n【${sp.name}】\n${out.content}\n`
+      }
+    }
+    await this.runCoordinatorFinal(config, coordinator, task, results)
   }
 
   // ============================================================

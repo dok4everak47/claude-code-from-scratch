@@ -20,7 +20,7 @@ import type {
 } from '@/engine/types'
 import { createLiveSessionState, defaultApiConfig, createMultiAgentEngineState } from '@/engine/types'
 import { MultiAgentEngine } from '@/engine/multiAgentEngine'
-import { OrchestrationEngine } from '@/engine/orchestrationEngine'
+import { OrchestrationEngine, type Topology } from '@/engine/orchestrationEngine'
 import { estimateRunTokens, estimateRunCostUSD, formatCostCNY } from '@/engine/cost'
 import type { LLMConfig } from '@/engine/llm'
 import MultiAgentFlow from '@/components/MultiAgentFlow'
@@ -86,6 +86,7 @@ export default function App() {
   const [selectedExperts, setSelectedExperts] = useState<string[]>([])
   const [concurrency, setConcurrency] = useState(0)
   const [maxRunTurns, setMaxRunTurns] = useState(4)
+  const [topology, setTopology] = useState<Topology>('fan-out')
   const selectedScenarioRef = useRef<MultiAgentScenario | null>(null)
 
   /** Specialist nodes of the currently-selected scenario (for the live toggle UI). */
@@ -100,9 +101,9 @@ export default function App() {
   const runEstimate = useMemo(() => {
     const enabled = liveSpecialists.filter((s) => selectedExperts.includes(s.id)).length
     const count = enabled || liveSpecialists.length
-    const est = estimateRunTokens(count, maxRunTurns)
-    return { ...est, costCNY: formatCostCNY(estimateRunCostUSD(apiConfig.model || 'deepseek-chat', count, maxRunTurns)) }
-  }, [liveSpecialists, selectedExperts, maxRunTurns, apiConfig.model])
+    const est = estimateRunTokens(count, maxRunTurns, topology)
+    return { ...est, costCNY: formatCostCNY(estimateRunCostUSD(apiConfig.model || 'deepseek-chat', count, maxRunTurns, topology)) }
+  }, [liveSpecialists, selectedExperts, maxRunTurns, topology, apiConfig.model])
 
   // ---- History state ----
   const HISTORY_STORAGE_KEY = 'demo-comparison-history'
@@ -404,9 +405,10 @@ export default function App() {
         enabledExperts: allSpecialists,
         concurrency,
         maxTurns: maxRunTurns,
+        topology,
       })
     }
-  }, [multiAgentRunMode, concurrency, maxRunTurns])
+  }, [multiAgentRunMode, concurrency, maxRunTurns, topology])
 
   const handleMultiAgentNext = useCallback(() => {
     if (multiAgentRunMode === 'demo') multiAgentEngineRef.current?.next()
@@ -438,8 +440,9 @@ export default function App() {
       enabledExperts: selectedExperts,
       concurrency,
       maxTurns: maxRunTurns,
+      topology,
     })
-  }, [selectedExperts, concurrency, maxRunTurns])
+  }, [selectedExperts, concurrency, maxRunTurns, topology])
 
   const handleMultiAgentRun = useCallback(async () => {
     const scenario = selectedScenarioRef.current
@@ -454,6 +457,7 @@ export default function App() {
       enabledExperts: selectedExperts,
       concurrency,
       maxTurns: maxRunTurns,
+      topology,
     })
     setIsOrchestrating(true)
     try {
@@ -468,18 +472,27 @@ export default function App() {
     setIsOrchestrating(false)
   }, [])
 
-  /** Re-load the live roster with current expert/concurrency/turn config. */
+  /** Re-load the live roster with current expert/concurrency/turn/topology config. */
   const reconfigureOrchestration = useCallback(
-    (nextExperts: string[], nextConcurrency: number, nextTurns: number) => {
+    (nextExperts: string[], nextConcurrency: number, nextTurns: number, nextTopology: Topology = topology) => {
       const scenario = selectedScenarioRef.current
       if (!scenario || multiAgentRunMode !== 'live' || isOrchestrating) return
       orchestrationEngineRef.current?.loadRoster(scenario, {
         enabledExperts: nextExperts,
         concurrency: nextConcurrency,
         maxTurns: nextTurns,
+        topology: nextTopology,
       })
     },
-    [multiAgentRunMode, isOrchestrating],
+    [multiAgentRunMode, isOrchestrating, topology],
+  )
+
+  const changeTopology = useCallback(
+    (t: Topology) => {
+      setTopology(t)
+      reconfigureOrchestration(selectedExperts, concurrency, maxRunTurns, t)
+    },
+    [selectedExperts, concurrency, maxRunTurns, reconfigureOrchestration],
   )
 
   const toggleExpert = useCallback(
@@ -707,6 +720,36 @@ export default function App() {
                     placeholder="输入要编排的任务，或保留场景默认描述…"
                     className="flex-1 min-w-[200px] bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-violet-500"
                   />
+
+                  {/* Topology selector */}
+                  <div className="inline-flex items-center gap-1">
+                    <span className="text-[11px] text-slate-500">拓扑</span>
+                    {(['fan-out', 'debate', 'pipeline'] as Topology[]).map((t) => {
+                      const labels: Record<Topology, string> = {
+                        'fan-out': '扇出',
+                        debate: '辩论',
+                        pipeline: '流水线',
+                      }
+                      const disabled = t === 'debate' && liveSpecialists.length < 2
+                      const on = topology === t
+                      return (
+                        <button
+                          key={t}
+                          type="button"
+                          disabled={disabled || isOrchestrating}
+                          onClick={() => changeTopology(t)}
+                          title={disabled ? '辩论模式需要至少 2 个专家' : ''}
+                          className={`px-2 py-1 text-[11px] rounded-md border transition-all ${
+                            on
+                              ? 'bg-violet-700/80 text-white border-violet-500'
+                              : 'bg-slate-800 text-slate-500 border-slate-700 hover:border-slate-600'
+                          } disabled:opacity-50`}
+                        >
+                          {labels[t]}
+                        </button>
+                      )
+                    })}
+                  </div>
 
                   {/* Expert toggles */}
                   {liveSpecialists.length > 0 && (

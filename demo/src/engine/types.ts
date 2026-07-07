@@ -164,6 +164,100 @@ export interface AgentStatusFeed {
   linterActive: boolean
 }
 
+// ============================================================
+// Multi-Agent types
+// ============================================================
+
+/** Status of an agent node in a multi-agent scenario */
+export type MultiAgentStatus = 'pending' | 'running' | 'thinking' | 'using_tools' | 'waiting' | 'completed' | 'failed'
+
+/** An agent node in the multi-agent execution tree */
+export interface AgentNode {
+  id: string
+  name: string
+  role: 'orchestrator' | 'worker' | 'specialist'
+  status: MultiAgentStatus
+  parentId: string | null
+  childrenIds: string[]
+  description: string
+  steps: AgentStep[]
+  messages: AgentMessage[]
+}
+
+/** A message exchanged between agents */
+export interface AgentMessage {
+  id: string
+  from: string
+  to: string
+  content: string
+  type: 'delegate' | 'progress' | 'result' | 'question' | 'response'
+  timestamp: string
+}
+
+/** A complete multi-agent scenario with nodes and timeline */
+export interface MultiAgentScenario {
+  id: string
+  name: string
+  description: string
+  nodes: AgentNode[]
+  timeline: MultiAgentEvent[]
+}
+
+/** A single event in the multi-agent timeline */
+export interface MultiAgentEvent {
+  id: string
+  time: string
+  type: 'agent_spawn' | 'agent_complete' | 'agent_fail' | 'agent_status_change' | 'message_send' | 'message_receive'
+  agentId?: string
+  messageId?: string
+  description: string
+  /** Additional data for the event */
+  data?: {
+    status?: MultiAgentStatus
+    message?: AgentMessage
+  }
+}
+
+/** A highlighted connection between two nodes */
+export interface HighlightedConnection {
+  from: string
+  to: string
+  type: string
+  messageId: string
+}
+
+/** Snapshot of the entire multi-agent state at a given timeline index */
+export interface MultiAgentSnapshot {
+  nodeStatuses: Record<string, MultiAgentStatus>
+  activeMessages: AgentMessage[]
+  highlightedConnections: HighlightedConnection[]
+  currentEventIndex: number
+  totalEvents: number
+  description: string
+}
+
+/** Engine state emitted on every change */
+export interface MultiAgentEngineState {
+  scenarioId: string | null
+  scenario: MultiAgentScenario | null
+  currentSnapshot: MultiAgentSnapshot | null
+  currentEventIndex: number
+  totalEvents: number
+  isPlaying: boolean
+}
+
+/** Default initial multi-agent engine state */
+export function createMultiAgentEngineState(): MultiAgentEngineState {
+  return {
+    scenarioId: null,
+    scenario: null,
+    currentSnapshot: null,
+    currentEventIndex: -1,
+    totalEvents: 0,
+    isPlaying: false,
+  }
+}
+
 /** Default initial live session state */
 export function createLiveSessionState(): LiveSessionState {
   return {

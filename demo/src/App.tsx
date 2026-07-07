@@ -15,15 +15,20 @@ import type {
   ApiConfig,
   Scenario,
   LiveSessionState,
+  MultiAgentScenario,
+  MultiAgentEngineState,
 } from '@/engine/types'
-import { createLiveSessionState, defaultApiConfig } from '@/engine/types'
+import { createLiveSessionState, defaultApiConfig, createMultiAgentEngineState } from '@/engine/types'
+import { MultiAgentEngine } from '@/engine/multiAgentEngine'
+import MultiAgentFlow from '@/components/MultiAgentFlow'
+import { multiAgentScenarios } from '@/engine/multiAgentScenarios'
 import ChatPanel from '@/components/ChatPanel'
 import AgentFlow from '@/components/AgentFlow'
 import StepTimeline from '@/components/StepTimeline'
 import ScenarioSelector from '@/components/ScenarioSelector'
 import ApiSettings from '@/components/ApiSettings'
 
-type AppMode = 'scenario' | 'live' | 'comparison'
+type AppMode = 'scenario' | 'live' | 'comparison' | 'multiAgent'
 
 export default function App() {
   // ---- Detect deployment — when on Vercel, hide API settings panel ----
@@ -33,7 +38,7 @@ export default function App() {
   const [mode, setMode] = useState<AppMode>(() => {
     try {
       const stored = localStorage.getItem('agent-demo-active-mode')
-      if (stored === 'scenario' || stored === 'live' || stored === 'comparison') return stored
+      if (stored === 'scenario' || stored === 'live' || stored === 'comparison' || stored === 'multiAgent') return stored
     } catch { /* ignore */ }
     return 'scenario'
   })
@@ -66,6 +71,10 @@ export default function App() {
   const comparisonAgentRef = useRef<ComparisonAgent | null>(null)
   const [comparisonDraft, setComparisonDraft] = useState('')
   const [comparisonSubMode, setComparisonSubMode] = useState<'summary' | 'detail'>('summary')
+
+  // ---- Multi-Agent mode state ----
+  const [multiAgentState, setMultiAgentState] = useState<MultiAgentEngineState>(createMultiAgentEngineState())
+  const multiAgentEngineRef = useRef<MultiAgentEngine | null>(null)
 
   // ---- History state ----
   const HISTORY_STORAGE_KEY = 'demo-comparison-history'
@@ -144,10 +153,17 @@ export default function App() {
     )
     comparisonAgentRef.current = comparisonAgent
 
+    // Multi-agent engine
+    const multiAgentEngine = new MultiAgentEngine({
+      onStateChange: (s) => setMultiAgentState(s),
+    })
+    multiAgentEngineRef.current = multiAgentEngine
+
     return () => {
       scenarioAgent.destroy()
       liveAgent.stop()
       comparisonAgent.stop()
+      multiAgentEngine.destroy()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -337,6 +353,20 @@ export default function App() {
   }, [])
 
   // ============================================================
+  // Multi-Agent mode handlers
+  // ============================================================
+
+  const handleMultiAgentLoadScenario = useCallback((scenario: MultiAgentScenario) => {
+    multiAgentEngineRef.current?.loadScenario(scenario)
+  }, [])
+
+  const handleMultiAgentNext = useCallback(() => multiAgentEngineRef.current?.next(), [])
+  const handleMultiAgentPrev = useCallback(() => multiAgentEngineRef.current?.prev(), [])
+  const handleMultiAgentPlay = useCallback(() => multiAgentEngineRef.current?.play(2000), [])
+  const handleMultiAgentPause = useCallback(() => multiAgentEngineRef.current?.pause(), [])
+  const handleMultiAgentReset = useCallback(() => multiAgentEngineRef.current?.reset(), [])
+
+  // ============================================================
   // Derived scenario state
   // ============================================================
 
@@ -403,6 +433,19 @@ export default function App() {
               `}
             >
               🔬 对比模式
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('multiAgent')}
+              className={`
+                px-3 py-1.5 text-sm font-medium rounded-md transition-all
+                ${mode === 'multiAgent'
+                  ? 'bg-slate-700 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+                }
+              `}
+            >
+              🤖 多 Agent
             </button>
           </div>
 
@@ -472,6 +515,33 @@ export default function App() {
               ) : (
                 <span className="text-xs text-slate-500">输入问题，对比 3 种策略差异</span>
               )}
+            </div>
+          )}
+
+          {/* Multi-Agent scenario selector */}
+          {mode === 'multiAgent' && (
+            <div className="flex-1 max-w-xl">
+              <div className="flex items-center gap-1.5">
+                {multiAgentScenarios.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => handleMultiAgentLoadScenario(s)}
+                    className={`
+                      px-3 py-1.5 text-xs font-medium rounded-lg transition-all whitespace-nowrap
+                      ${multiAgentState.scenarioId === s.id
+                        ? 'bg-violet-700 text-white shadow-sm'
+                        : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
+                      }
+                    `}
+                  >
+                    {s.name}
+                  </button>
+                ))}
+                {!multiAgentState.scenarioId && (
+                  <span className="text-xs text-slate-500 ml-1">选择场景开始</span>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -989,6 +1059,22 @@ export default function App() {
             </>
           )}
         </>
+      )}
+
+      {/* ============================================================ */}
+      {/* MULTI-AGENT MODE */}
+      {/* ============================================================ */}
+      {mode === 'multiAgent' && (
+        <main className="flex-1 flex min-h-0">
+          <MultiAgentFlow
+            engineState={multiAgentState}
+            onNext={handleMultiAgentNext}
+            onPrev={handleMultiAgentPrev}
+            onPlay={handleMultiAgentPlay}
+            onPause={handleMultiAgentPause}
+            onReset={handleMultiAgentReset}
+          />
+        </main>
       )}
     </div>
   )

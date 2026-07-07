@@ -126,7 +126,7 @@ export default function MultiAgentFlow({
 
   if (!hasScenario) {
     return (
-      <div className="flex flex-col items-center justify-center h-full min-h-[320px] p-8">
+      <div className="flex flex-col items-center justify-center w-full h-full min-h-[320px] p-8">
         {/* Decorative container */}
         <div className="relative flex flex-col items-center gap-5 px-10 py-8 rounded-2xl border border-slate-700/40 bg-slate-800/30 backdrop-blur-sm max-w-lg">
           {/* Subtle glow ring */}

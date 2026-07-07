@@ -5,11 +5,76 @@
 // so a Vercel deployment with DEEPSEEK_API_KEY works out of the box.
 // The API key is kept server-side: it is sent from the browser only
 // to this first-party proxy, never to third parties.
+//
+// Lightweight abuse protection (added 2026-07-08):
+//   1. Per-IP rate limiting (sliding window, in-memory).
+//   2. Origin / Referer allowlist — only same-site + localhost in prod.
+//   3. Optional access-token gate — enable by setting PROXY_ACCESS_TOKEN
+//      on Vercel. Requests must then carry header `x-proxy-token`.
 // ============================================================
 
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 
 const DEFAULT_BASE_URL = 'https://api.deepseek.com/chat/completions'
+
+// --- Rate limiting (per IP, sliding window) ---
+const RATE_LIMIT = 100 // max requests
+const RATE_WINDOW_MS = 60 * 1000 // per 60 seconds
+const hits = new Map<string, number[]>()
+
+function getClientIp(req: VercelRequest): string {
+  const fwd = req.headers['x-forwarded-for']
+  const raw = typeof fwd === 'string' ? fwd : Array.isArray(fwd) ? fwd[0] : ''
+  return raw.split(',')[0].trim() || (req.headers['x-vercel-ip'] as string) || 'unknown'
+}
+
+function rateLimited(ip: string): boolean {
+  const now = Date.now()
+  const list = (hits.get(ip) ?? []).filter((t) => now - t < RATE_WINDOW_MS)
+  list.push(now)
+  hits.set(ip, list)
+  return list.length > RATE_LIMIT
+}
+
+// --- Origin / Referer allowlist (production only) ---
+// Build the set of allowed hosts once. Note: VERCEL_URL on Vercel is the
+// *deployment* URL (e.g. agent-playground-xxxx-...vercel.app), which differs
+// from the alias visitors actually use. We allow both, plus the stable alias,
+// plus localhost for dev. If you add a custom domain, append it here.
+function allowedHosts(): Set<string> {
+  const hosts = new Set<string>(['localhost', '127.0.0.1', 'agent-playground-ruddy.vercel.app'])
+  if (process.env.VERCEL_URL) {
+    try {
+      hosts.add(new URL(`https://${process.env.VERCEL_URL}`).host)
+    } catch {
+      /* ignore */
+    }
+  }
+  return hosts
+}
+
+function hostOf(url: string | undefined): string | null {
+  if (!url) return null
+  try {
+    return new URL(url).host
+  } catch {
+    return null
+  }
+}
+
+function originAllowed(req: VercelRequest): boolean {
+  if (process.env.NODE_ENV !== 'production') return true
+  const hosts = allowedHosts()
+  const origin = req.headers.origin
+  const referer = req.headers.referer
+  if (origin) {
+    const h = hostOf(origin)
+    return !!h && hosts.has(h)
+  }
+  // No Origin header: allow only a same-site referer.
+  const rh = hostOf(referer)
+  return !!rh && hosts.has(rh)
+}
 
 function normalizeOpenAI(url: string): string {
   let u = url.trim().replace(/\/+$/, '')
@@ -21,6 +86,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Only allow POST
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method Not Allowed' })
+  }
+
+  // 1) Rate limit
+  const ip = getClientIp(req)
+  if (rateLimited(ip)) {
+    res.setHeader('Retry-After', '60')
+    return res.status(429).json({ error: '请求过于频繁，请稍后再试（限流保护）' })
+  }
+
+  // 2) Origin allowlist (blocks cross-site / direct hotlink abuse)
+  if (!originAllowed(req)) {
+    return res.status(403).json({ error: '拒绝访问：仅允许来自本站点的请求' })
+  }
+
+  // 3) Optional access-token gate
+  const accessToken = process.env.PROXY_ACCESS_TOKEN
+  if (accessToken) {
+    const provided = req.headers['x-proxy-token']
+    if (provided !== accessToken) {
+      return res.status(403).json({ error: '缺少有效的访问口令' })
+    }
   }
 
   // Prefer the API Key sent from the browser (user's own config),

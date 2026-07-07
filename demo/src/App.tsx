@@ -592,23 +592,21 @@ export default function App() {
             </button>
           </div>
 
-          {/* Settings button — hidden on Vercel (proxy mode) */}
-          {!isDeployed && (
-            <button
-              type="button"
-              onClick={() => setSettingsOpen(!settingsOpen)}
-              className={`
-                px-3 py-1.5 text-sm font-medium rounded-lg transition-all flex-shrink-0
-                ${settingsOpen
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
-                }
-              `}
-              title="API 设置"
-            >
-              ⚙️ API 设置
-            </button>
-          )}
+          {/* Settings button — on Vercel the key is sent through /api/proxy */}
+          <button
+            type="button"
+            onClick={() => setSettingsOpen(!settingsOpen)}
+            className={`
+              px-3 py-1.5 text-sm font-medium rounded-lg transition-all flex-shrink-0
+              ${settingsOpen
+                ? 'bg-blue-600 text-white'
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
+              }
+            `}
+            title="API 设置"
+          >
+            ⚙️ API 设置
+          </button>
 
           {/* Scenario selector (only in scenario mode) */}
           {mode === 'scenario' && (
@@ -804,15 +802,13 @@ export default function App() {
         </div>
       </header>
 
-      {/* === API Settings panel (hidden on Vercel) === */}
-	      {!isDeployed && (
-	        <ApiSettings
-	          config={apiConfig}
-	          onChange={setApiConfig}
-	          isOpen={settingsOpen}
-	          onToggle={() => setSettingsOpen(false)}
-	        />
-	      )}
+      {/* === API Settings panel (available everywhere) === */}
+      <ApiSettings
+        config={apiConfig}
+        onChange={setApiConfig}
+        isOpen={settingsOpen}
+        onToggle={() => setSettingsOpen(false)}
+      />
 
       {/* ============================================================ */}
       {/* SCENARIO MODE */}

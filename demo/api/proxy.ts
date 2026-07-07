@@ -11,15 +11,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Method Not Allowed' })
   }
 
-  // Read API Key from environment variable (set in Vercel Dashboard)
-  const apiKey = process.env.DEEPSEEK_API_KEY
+  // Prefer the API Key sent from the browser (user's own config),
+  // fall back to the Vercel environment variable.
+  const bodyKey =
+    typeof req.body?.apiKey === 'string' ? req.body.apiKey.trim() : ''
+  const apiKey = bodyKey || process.env.DEEPSEEK_API_KEY
   if (!apiKey) {
-    return res.status(500).json({ error: 'DEEPSEEK_API_KEY 环境变量未配置' })
+    return res
+      .status(500)
+      .json({ error: '未配置 API Key：请在「⚙️ API 设置」中填写，或在 Vercel 配置 DEEPSEEK_API_KEY 环境变量' })
   }
 
+  // Model: respect the frontend's choice unless it's the openai default
+  // (gpt-4o) left untouched — then fall back to a working DeepSeek model.
+  const frontendModel = typeof req.body?.model === 'string' ? req.body.model.trim() : ''
+  const model =
+    frontendModel && frontendModel !== 'gpt-4o'
+      ? frontendModel
+      : bodyKey
+        ? 'deepseek-chat'
+        : 'deepseek-v4-flash'
+
   try {
-    // Override model to DeepSeek's model name, ignore what frontend sends
-    const body = { ...req.body, model: 'deepseek-v4-flash' }
+    // Forward body to DeepSeek, override model, strip the raw key.
+    const body = { ...req.body, model }
+    delete (body as Record<string, unknown>).apiKey
 
     // Forward to DeepSeek API
     const response = await fetch('https://api.deepseek.com/chat/completions', {

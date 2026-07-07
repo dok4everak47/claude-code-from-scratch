@@ -180,6 +180,13 @@ export class OrchestrationEngine {
         await this.runFanOut(config, coordinator, specialists, task)
       }
       this.setStatus(coordinator.id, 'completed')
+      // Safety net: a topology may leave a specialist in a transient state
+      // (e.g. debate sets both debaters to 'waiting' during the judge phase).
+      // Now that the run has finished, finalize any non-terminal specialist status.
+      for (const n of specialists) {
+        const s = this.statuses[n.id]
+        if (s && s !== 'completed' && s !== 'failed') this.setStatus(n.id, 'completed')
+      }
     } catch (e) {
       if (e instanceof DOMException && e.name === 'AbortError') {
         // user stopped — leave current partial state
@@ -693,6 +700,10 @@ ${resultText}
     // Coordinator judges / synthesizes
     this.setStatus(a.id, 'waiting'); this.setStatus(b.id, 'waiting')
     await this.runCoordinatorJudge(config, coordinator, task, transcript.map((t) => `${t.speaker}：${t.text}`).join('\n\n'))
+    // Both debaters have finished all their speaking turns — finalize them as completed
+    // (otherwise they remain stuck on the 'waiting' label after the run ends).
+    this.setStatus(a.id, 'completed')
+    this.setStatus(b.id, 'completed')
   }
 
   private async runDebaterTurn(

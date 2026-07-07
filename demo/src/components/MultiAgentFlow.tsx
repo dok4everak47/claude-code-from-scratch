@@ -407,11 +407,11 @@ function TreeView({
   const rootStatus = getNodeStatus(rootNode.id)
 
   return (
-    <div ref={containerRef} className="relative flex flex-col items-center min-h-[280px] pt-8 overflow-hidden w-full max-w-full">
+    <div ref={containerRef} className="relative flex flex-col items-center pt-8 pb-8 w-full max-w-full min-h-[200px]">
       {/* SVG Connection Lines */}
       <svg
         className="absolute inset-0 pointer-events-none"
-        style={{ zIndex: 0, width: '100%', height: '100%' }}
+        style={{ zIndex: 0, width: '100%', height: '100%', overflow: 'visible' }}
       >
         <defs>
           <marker id="arrowhead-default" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
@@ -502,7 +502,7 @@ function TreeView({
 
         {/* Children row */}
         {childNodes.length > 0 && (
-          <div className="flex justify-center gap-6">
+          <div className="flex justify-center gap-6 flex-nowrap">
             {childNodes.map((child) => {
               const childStatus = getNodeStatus(child.id)
               return (

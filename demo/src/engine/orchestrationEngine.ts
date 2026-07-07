@@ -276,6 +276,35 @@ export class OrchestrationEngine {
     this.isRunning = false
   }
 
+  /** Return a deep copy of the recorded event timeline (for persistence). */
+  getTimeline(): MultiAgentEvent[] {
+    return clone(this.timeline)
+  }
+
+  /**
+   * Load a previously-saved run for offline replay. No LLM calls are made;
+   * the visualization + playback controls operate purely on the stored timeline.
+   */
+  loadFromHistory(data: {
+    scenario: MultiAgentScenario
+    timeline: MultiAgentEvent[]
+    usage: { promptTokens: number; completionTokens: number }
+  }): void {
+    this.stopPlay()
+    this.roster = data.scenario
+    this.activeNodes = data.scenario.nodes
+    this.liveScenario = data.scenario
+    this.timeline = clone(data.timeline)
+    this.usage = { ...data.usage }
+    this.statuses = {}
+    for (const n of this.activeNodes) this.statuses[n.id] = 'pending'
+    this.activeMessages = []
+    this.currentEventIndex = this.timeline.length - 1
+    this.isRunning = false
+    this.isPlaying = false
+    this.emit()
+  }
+
   getState(): MultiAgentEngineState {
     return {
       scenarioId: this.liveScenario?.id ?? null,

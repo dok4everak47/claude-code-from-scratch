@@ -22,8 +22,11 @@ import { createLiveSessionState, defaultApiConfig, createMultiAgentEngineState }
 import { MultiAgentEngine } from '@/engine/multiAgentEngine'
 import { OrchestrationEngine, type Topology } from '@/engine/orchestrationEngine'
 import { estimateRunTokens, estimateRunCostUSD, formatCostCNY } from '@/engine/cost'
+import type { SavedRun } from '@/engine/runHistory'
+import { loadRuns, addRun, deleteRun, clearRuns, extractFinalAnswer } from '@/engine/runHistory'
 import type { LLMConfig } from '@/engine/llm'
 import MultiAgentFlow from '@/components/MultiAgentFlow'
+import RunHistoryPanel from '@/components/RunHistoryPanel'
 import { multiAgentScenarios } from '@/engine/multiAgentScenarios'
 import ChatPanel from '@/components/ChatPanel'
 import AgentFlow from '@/components/AgentFlow'
@@ -88,6 +91,13 @@ export default function App() {
   const [maxRunTurns, setMaxRunTurns] = useState(4)
   const [topology, setTopology] = useState<Topology>('fan-out')
   const selectedScenarioRef = useRef<MultiAgentScenario | null>(null)
+
+  // ---- Live run history (persisted to localStorage) ----
+  const [runHistory, setRunHistory] = useState<SavedRun[]>(() => loadRuns())
+  const [viewingRunId, setViewingRunId] = useState<string | null>(null)
+  const [maHistoryOpen, setMaHistoryOpen] = useState(false)
+  const [compareIds, setCompareIds] = useState<string[]>([])
+  const [compareOpen, setCompareOpen] = useState(false)
 
   /** Specialist nodes of the currently-selected scenario (for the live toggle UI). */
   const liveSpecialists = useMemo(() => {
@@ -394,6 +404,7 @@ export default function App() {
 
   const handleMultiAgentLoadScenario = useCallback((scenario: MultiAgentScenario) => {
     selectedScenarioRef.current = scenario
+    setViewingRunId(null)
     setLiveTask(scenario.description)
     const coord = scenario.nodes.find((n) => n.role === 'orchestrator') ?? scenario.nodes[0]
     const allSpecialists = scenario.nodes.filter((n) => n.id !== coord.id).map((n) => n.id)
@@ -453,6 +464,9 @@ export default function App() {
       model: apiConfig.model,
       maxTurns: apiConfig.maxTurns,
     }
+    const savedTask = liveTask
+    const savedTopology = topology
+    const savedModel = apiConfig.model || 'deepseek-v4-flash'
     orchestrationEngineRef.current?.loadRoster(scenario, {
       enabledExperts: selectedExperts,
       concurrency,
@@ -464,8 +478,61 @@ export default function App() {
       await orchestrationEngineRef.current?.run(cfg, liveTask)
     } finally {
       setIsOrchestrating(false)
+      // Persist the completed run so it can be replayed / compared later.
+      const engine = orchestrationEngineRef.current
+      const st = engine?.getState()
+      const timeline = engine?.getTimeline() ?? []
+      if (st?.scenario && timeline.length > 0) {
+        const run: SavedRun = {
+          id: `run-${Date.now()}`,
+          savedAt: Date.now(),
+          scenarioId: st.scenario.id,
+          scenarioName: st.scenario.name,
+          topology: savedTopology,
+          task: savedTask,
+          model: savedModel,
+          usage: st.usage ?? { promptTokens: 0, completionTokens: 0 },
+          scenario: st.scenario,
+          timeline,
+        }
+        setRunHistory(addRun(run))
+        setViewingRunId(null)
+      }
     }
-  }, [apiConfig, liveTask, selectedExperts, concurrency, maxRunTurns])
+  }, [apiConfig, liveTask, selectedExperts, concurrency, maxRunTurns, topology])
+
+  /** Load a saved run into the engine for offline replay (no LLM calls). */
+  const viewRun = useCallback((run: SavedRun) => {
+    orchestrationEngineRef.current?.loadFromHistory({
+      scenario: run.scenario,
+      timeline: run.timeline,
+      usage: run.usage,
+    })
+    setLiveTask(run.task)
+    setViewingRunId(run.id)
+    setMultiAgentRunMode('live')
+  }, [])
+
+  /** Exit history-view mode, reload the current scenario's fresh roster. */
+  const exitView = useCallback(() => {
+    setViewingRunId(null)
+    const scenario = selectedScenarioRef.current
+    if (scenario) {
+      orchestrationEngineRef.current?.loadRoster(scenario, {
+        enabledExperts: selectedExperts,
+        concurrency,
+        maxTurns: maxRunTurns,
+        topology,
+      })
+    }
+  }, [selectedExperts, concurrency, maxRunTurns, topology])
+
+  /** Toggle a run's selection for side-by-side comparison. */
+  const toggleCompare = useCallback((id: string) => {
+    setCompareIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id].slice(-2),
+    )
+  }, [])
 
   const handleMultiAgentStop = useCallback(() => {
     orchestrationEngineRef.current?.stop()
@@ -842,7 +909,21 @@ export default function App() {
                   )}
                 </div>
               )}
+              <RunHistoryPanel
+                runs={runHistory}
+                viewingRunId={viewingRunId}
+                open={maHistoryOpen}
+                compareIds={compareIds}
+                onToggleOpen={() => setMaHistoryOpen(!maHistoryOpen)}
+                onView={viewRun}
+                onExit={exitView}
+                onToggleCompare={toggleCompare}
+                onDelete={(id) => { setRunHistory(deleteRun(id)); setCompareIds((p) => p.filter((x) => x !== id)); if (viewingRunId === id) exitView() }}
+                onClear={() => { setRunHistory(clearRuns()); setCompareIds([]); setViewingRunId(null) }}
+                onCompare={() => setCompareOpen(true)}
+              />
             </div>
+
           )}
         </div>
       </header>
@@ -1376,6 +1457,59 @@ export default function App() {
           />
         </main>
       )}
+
+      {/* === Run comparison modal === */}
+      {compareOpen && compareIds.length === 2 && (() => {
+        const a = runHistory.find((r) => r.id === compareIds[0])
+        const b = runHistory.find((r) => r.id === compareIds[1])
+        if (!a || !b) return null
+        const col = (r: SavedRun) => (
+          <div className="flex-1 min-w-0 rounded-lg border border-slate-700 bg-slate-900/50 p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">
+                {r.topology === 'fan-out' ? '扇出' : r.topology === 'debate' ? '辩论' : '流水线'}
+              </span>
+              <span className="text-xs font-semibold text-slate-200 truncate">{r.scenarioName}</span>
+            </div>
+            <div className="text-[11px] text-slate-500 mb-1">任务：{r.task || '(默认)'}</div>
+            <div className="text-[11px] text-slate-400 mb-1">模型：{r.model}</div>
+            <div className="text-[11px] text-emerald-400/80 mb-2">
+              用量：{r.usage.promptTokens + r.usage.completionTokens} tok
+              （输入 {r.usage.promptTokens} / 输出 {r.usage.completionTokens}）
+            </div>
+            <div className="text-[11px] text-slate-400 mb-1 font-medium">最终答案：</div>
+            <div className="text-[11px] text-slate-300 max-h-56 overflow-y-auto whitespace-pre-wrap leading-relaxed">
+              {extractFinalAnswer(r.timeline) || '(无)'}
+            </div>
+          </div>
+        )
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+            onClick={() => setCompareOpen(false)}
+          >
+            <div
+              className="w-full max-w-3xl rounded-xl border border-slate-700 bg-slate-900 p-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-sm font-semibold text-slate-200">运行对比</span>
+                <button
+                  type="button"
+                  onClick={() => setCompareOpen(false)}
+                  className="text-slate-400 hover:text-white"
+                >
+                  ✕
+                </button>
+              </div>
+              <div className="flex gap-3">
+                {col(a)}
+                {col(b)}
+              </div>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }

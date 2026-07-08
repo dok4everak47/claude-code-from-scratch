@@ -17,7 +17,7 @@ import type {
   MultiAgentScenario,
   MultiAgentEngineState,
 } from '@/engine/types'
-import { createLiveSessionState, defaultApiConfig, createMultiAgentEngineState } from '@/engine/types'
+import { createLiveSessionState, defaultApiConfig, createMultiAgentEngineState, type MultiAgentEvent } from '@/engine/types'
 import { MultiAgentEngine } from '@/engine/multiAgentEngine'
 import { OrchestrationEngine, type Topology } from '@/engine/orchestrationEngine'
 import { estimateRunTokens, estimateRunCostUSD, formatCostCNY } from '@/engine/cost'
@@ -108,6 +108,10 @@ export default function App() {
   const [topology, setTopology] = useState<Topology>('fan-out')
   const [faultToolFailure, setFaultToolFailure] = useState(false)
   const [faultMaxTurnsCrash, setFaultMaxTurnsCrash] = useState(false)
+  const [runTimeline, setRunTimeline] = useState<MultiAgentEvent[]>([])
+  const [runInsights, setRunInsights] = useState<string | null>(null)
+  const [isGeneratingInsights, setIsGeneratingInsights] = useState(false)
+  const [showPostMortem, setShowPostMortem] = useState(false)
   const selectedScenarioRef = useRef<MultiAgentScenario | null>(null)
 
   // ---- Live run history (persisted to localStorage) ----
@@ -496,12 +500,15 @@ export default function App() {
       forceMaxTurns: faultMaxTurnsCrash ? 1 : undefined,
     })
     setIsOrchestrating(true)
+    setRunInsights(null)
+    setShowPostMortem(false)
     try {
       await orchestrationEngineRef.current?.run(cfg, liveTask)
     } finally {
       setIsOrchestrating(false)
-      // Persist the completed run so it can be replayed / compared later.
+      // Store timeline for post-mortem analysis
       const engine = orchestrationEngineRef.current
+      setRunTimeline(engine?.getTimeline() ?? [])
       const st = engine?.getState()
       const timeline = engine?.getTimeline() ?? []
       if (st?.scenario && timeline.length > 0) {
@@ -565,6 +572,24 @@ export default function App() {
     if (key === 'toolFailure') setFaultToolFailure((v) => !v)
     else setFaultMaxTurnsCrash((v) => !v)
   }, [])
+
+  const handleGenerateInsights = useCallback(async () => {
+    const engine = orchestrationEngineRef.current
+    if (!engine) return
+    const cfg: LLMConfig = {
+      apiKey: apiConfig.apiKey,
+      baseUrl: apiConfig.baseUrl,
+      model: apiConfig.model,
+      maxTurns: 1,
+    }
+    setIsGeneratingInsights(true)
+    try {
+      const text = await engine.generateInsights(cfg)
+      setRunInsights(text)
+    } finally {
+      setIsGeneratingInsights(false)
+    }
+  }, [apiConfig])
 
   /** Re-load the live roster with current expert/concurrency/turn/topology config. */
   const reconfigureOrchestration = useCallback(
@@ -738,6 +763,13 @@ export default function App() {
           faultToolFailure={faultToolFailure}
           faultMaxTurnsCrash={faultMaxTurnsCrash}
           onToggleFault={handleToggleFault}
+          runTimeline={runTimeline}
+          runInsights={runInsights}
+          isGeneratingInsights={isGeneratingInsights}
+          onGenerateInsights={handleGenerateInsights}
+          showPostMortem={showPostMortem}
+          onTogglePostMortem={() => setShowPostMortem((v) => !v)}
+          modelName={apiConfig.model}
           costEstimate={{
             promptTokens: runEstimate.promptTokens,
             completionTokens: runEstimate.completionTokens,

@@ -319,6 +319,61 @@ export class OrchestrationEngine {
   }
 
   /**
+   * Ask the LLM to analyze the completed run and produce optimization
+   * insights (bottleneck analysis, redundant steps, token-saving tips).
+   */
+  async generateInsights(config: LLMConfig): Promise<string> {
+    if (this.timeline.length === 0) return '暂无运行数据可分析'
+
+    const systemPrompt = `你是一个 Agent 系统性能分析师。请分析以下多 Agent 运行记录，给出：
+1. 运行概览（Agent 数量、轮次、工具调用、token 消耗）
+2. 瓶颈分析（哪个 Agent 消耗最多、哪些步骤可能冗余）
+3. 优化建议（如何减少 token、提高效率、改善协作）
+
+请简洁、具体、可操作，用中文回答。`
+
+    try {
+      const result = await streamChat(
+        config,
+        [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: this.buildRunSummary() },
+        ],
+        [],
+        { onUsage: (u) => this.recordUsage('__insights__', u) },
+        undefined,
+      )
+      return result.content || '（分析完成但无输出）'
+    } catch (e) {
+      return `分析失败：${e instanceof Error ? e.message : e}`
+    }
+  }
+
+  /** Build a text summary of the current run for LLM analysis. */
+  private buildRunSummary(): string {
+    const lines: string[] = []
+    lines.push(`拓扑: ${this.topologyName()}`)
+    lines.push(`事件数: ${this.timeline.length}`)
+    lines.push(`Token: 输入 ${this.usage.promptTokens} / 输出 ${this.usage.completionTokens}`)
+    lines.push('')
+    lines.push('各 Agent 统计:')
+    for (const [agentId, u] of Object.entries(this.perAgentUsage)) {
+      const node = this.roster?.nodes.find((n) => n.id === agentId)
+      const steps = this.liveScenario?.nodes.find((n) => n.id === agentId)?.steps ?? []
+      const toolCalls = steps.filter((s) => s.type === 'tool_call').length
+      lines.push(
+        `- ${node?.name ?? agentId}: ${steps.length} 步, ${toolCalls} 次工具调用, ${u.promptTokens + u.completionTokens} tok`,
+      )
+    }
+    lines.push('')
+    lines.push('事件时间线:')
+    for (const ev of this.timeline) {
+      lines.push(`  [${ev.time}] ${ev.description}`)
+    }
+    return lines.join('\n')
+  }
+
+  /**
    * Load a previously-saved run for offline replay. No LLM calls are made;
    * the visualization + playback controls operate purely on the stored timeline.
    */
@@ -1063,8 +1118,8 @@ ${acc}`
     if (node) node.steps.push(step)
   }
 
-  private record(event: Omit<MultiAgentEvent, 'id' | 'time'>): void {
-    const full: MultiAgentEvent = { id: uid('ev'), time: ts(), ...event }
+  private record(event: Omit<MultiAgentEvent, 'id' | 'time' | 'ms'>): void {
+    const full: MultiAgentEvent = { id: uid('ev'), time: ts(), ms: Date.now(), ...event }
     this.timeline.push(full)
     this.applyEvent(full, this.statuses, this.activeMessages)
     this.currentEventIndex = this.timeline.length - 1

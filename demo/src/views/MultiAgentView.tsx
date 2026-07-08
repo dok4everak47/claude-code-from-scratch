@@ -7,7 +7,7 @@
 // ============================================================
 
 import { useState } from 'react'
-import type { MultiAgentScenario, MultiAgentEngineState } from '@/engine/types'
+import type { MultiAgentScenario, MultiAgentEngineState, MultiAgentEvent } from '@/engine/types'
 import type { Topology } from '@/engine/orchestrationEngine'
 import type { SavedRun } from '@/engine/runHistory'
 import { extractFinalAnswer } from '@/engine/runHistory'
@@ -15,6 +15,7 @@ import { Button } from '@/components/Button'
 import MultiAgentFlow from '@/components/MultiAgentFlow'
 import RunHistoryPanel from '@/components/RunHistoryPanel'
 import { ContextBudgetPanel } from '@/components/ContextBudgetPanel'
+import { PostMortemPanel } from '@/components/PostMortemPanel'
 
 interface CostEstimate {
   promptTokens: number
@@ -45,6 +46,20 @@ interface MultiAgentViewProps {
   faultMaxTurnsCrash: boolean
   /** Toggle a fault injection mode */
   onToggleFault: (key: 'toolFailure' | 'maxTurnsCrash') => void
+  /** Post-mortem: full timeline from the completed run */
+  runTimeline: MultiAgentEvent[]
+  /** Post-mortem: LLM-generated insights text */
+  runInsights: string | null
+  /** Post-mortem: whether insights are being generated */
+  isGeneratingInsights: boolean
+  /** Post-mortem: generate LLM insights */
+  onGenerateInsights: () => void
+  /** Post-mortem: panel visibility */
+  showPostMortem: boolean
+  /** Post-mortem: toggle panel */
+  onTogglePostMortem: () => void
+  /** Model name (for cost estimate in post-mortem) */
+  modelName: string
   costEstimate: CostEstimate
   usage: MultiAgentEngineState['usage']
   apiKey: string
@@ -92,6 +107,13 @@ export function MultiAgentView({
   faultToolFailure,
   faultMaxTurnsCrash,
   onToggleFault,
+  runTimeline,
+  runInsights,
+  isGeneratingInsights,
+  onGenerateInsights,
+  showPostMortem,
+  onTogglePostMortem,
+  modelName,
   costEstimate,
   usage,
   apiKey,
@@ -327,6 +349,22 @@ export function MultiAgentView({
                 </button>
               )}
 
+              {/* Post-mortem toggle (only after a run completes) */}
+              {runTimeline.length > 0 && !isOrchestrating && (
+                <button
+                  type="button"
+                  onClick={onTogglePostMortem}
+                  className={`text-[11px] px-2 py-1 rounded-full border transition-all duration-150 whitespace-nowrap ${
+                    showPostMortem
+                      ? 'bg-violet-500/80 text-white border-violet-500'
+                      : 'bg-slate-800 text-slate-400 border-slate-700 hover:border-slate-600 hover:text-slate-300'
+                  }`}
+                  title="运行复盘分析"
+                >
+                  📋 复盘
+                </button>
+              )}
+
               {isOrchestrating ? (
                 <Button
                   variant="danger"
@@ -399,6 +437,33 @@ export function MultiAgentView({
                 contextTimeline={contextTimeline}
                 contextWindowLimit={contextWindowLimit}
                 scenario={engineState.scenario}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Post-mortem overlay panel */}
+        {showPostMortem && runTimeline.length > 0 && (
+          <div className="absolute top-3 left-3 w-80 max-w-[calc(100vw-2rem)] z-30 max-h-[calc(100%-1.5rem)] overflow-y-auto">
+            <div className="relative">
+              <button
+                type="button"
+                onClick={onTogglePostMortem}
+                className="absolute -top-1 -right-1 z-10 w-5 h-5 flex items-center justify-center rounded-full bg-slate-700 hover:bg-slate-600 text-slate-300 text-[10px] ring-1 ring-white/10"
+                title="关闭"
+              >
+                ✕
+              </button>
+              <PostMortemPanel
+                timeline={runTimeline}
+                perAgentUsage={perAgentUsage}
+                usage={usage ?? { promptTokens: 0, completionTokens: 0 }}
+                scenario={engineState.scenario}
+                topology={topology}
+                model={modelName}
+                onGenerateInsights={onGenerateInsights}
+                insights={runInsights}
+                isGenerating={isGeneratingInsights}
               />
             </div>
           </div>

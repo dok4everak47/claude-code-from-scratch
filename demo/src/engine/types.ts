@@ -215,6 +215,8 @@ export interface MultiAgentScenario {
 export interface MultiAgentEvent {
   id: string
   time: string
+  /** Epoch milliseconds (for duration computation in post-mortem) */
+  ms?: number
   type: 'agent_spawn' | 'agent_complete' | 'agent_fail' | 'agent_status_change' | 'message_send' | 'message_receive'
   agentId?: string
   messageId?: string

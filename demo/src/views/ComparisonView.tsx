@@ -742,20 +742,42 @@ function ComparisonTimeline({ columns }: { columns: AnyColumn[] }) {
 
   const norm = normalizeColumns(columns)
 
-  // Global time range across all lanes
-  let gMin = Infinity
-  let gMax = -Infinity
+  // Global time range across all lanes — auto-focus on active region
+  let rawMin = Infinity
+  let rawMax = -Infinity
   for (const c of norm) {
     for (const it of c.items) {
-      gMin = Math.min(gMin, it.ms)
-      gMax = Math.max(gMax, it.ms)
+      rawMin = Math.min(rawMin, it.ms)
+      rawMax = Math.max(rawMax, it.ms)
+      if (it.toolStart != null) rawMin = Math.min(rawMin, it.toolStart)
+      if (it.toolEnd != null) rawMax = Math.max(rawMax, it.toolEnd)
     }
-    gMin = Math.min(gMin, c.baseStart)
-    gMax = Math.max(gMax, c.baseEnd)
+    rawMin = Math.min(rawMin, c.baseStart)
+    rawMax = Math.max(rawMax, c.baseEnd)
   }
-  if (!isFinite(gMin)) {
-    gMin = 0
-    gMax = 1
+  // Find "interesting" events (tool calls & responses) to trim leading/trailing idle gaps
+  let activeMin = Infinity
+  let activeMax = -Infinity
+  for (const c of norm) {
+    for (const it of c.items) {
+      const isInteresting = it.step.type === 'tool_call' || it.step.type === 'response'
+      if (!isInteresting) continue
+      const t = it.toolStart ?? it.ms
+      const e = it.toolEnd ?? it.ms
+      activeMin = Math.min(activeMin, t)
+      activeMax = Math.max(activeMax, e)
+    }
+  }
+  const hasActiveRegion = isFinite(activeMin) && isFinite(activeMax) && activeMax > activeMin
+  const PADDING_MS = 500 // ±500ms padding around the active region
+  let gMin: number
+  let gMax: number
+  if (hasActiveRegion) {
+    gMin = Math.max(0, activeMin - PADDING_MS)
+    gMax = activeMax + PADDING_MS
+  } else {
+    gMin = isFinite(rawMin) ? rawMin : 0
+    gMax = isFinite(rawMax) ? rawMax : 1
   }
   if (gMax <= gMin) gMax = gMin + 1
   const span = gMax - gMin
@@ -822,7 +844,7 @@ function ComparisonTimeline({ columns }: { columns: AnyColumn[] }) {
                 <span className="text-xs text-slate-300 truncate">{c.label}</span>
               </div>
               {/* lane track */}
-              <div className="relative flex-1 min-w-0 h-11 bg-slate-800/30 rounded border border-slate-700/40">
+              <div className="relative flex-1 min-w-0 h-8 bg-slate-800/30 rounded border border-slate-700/40">
                 {ticks.map((t, i) => (
                   <div
                     key={i}
@@ -833,6 +855,7 @@ function ComparisonTimeline({ columns }: { columns: AnyColumn[] }) {
                 {c.items.map((it) => {
                   const isTool = it.step.type === 'tool_call'
                   const isResponse = it.step.type === 'response'
+                  const isThought = !isTool && !isResponse
                   const isDiv = isTool && divergent.has(it.step.id)
                   // Tool-call execution window: render as a bar spanning start→end.
                   const hasToolSpan = isTool && typeof it.toolStart === 'number'
@@ -847,14 +870,28 @@ function ComparisonTimeline({ columns }: { columns: AnyColumn[] }) {
                   } else {
                     leftPct = pos(it.ms)
                   }
+                  // Thought: thin vertical marker instead of a fat block
+                  if (isThought) {
+                    return (
+                      <button
+                        key={it.step.id}
+                        type="button"
+                        onClick={() => setSelected({ colKey: c.key, step: it.step })}
+                        title={it.step.content.slice(0, 80)}
+                        className="absolute top-1 bottom-1 w-0.5 bg-slate-500/50 rounded-full transition-all hover:bg-slate-400 hover:w-1 hover:z-10"
+                        style={{ left: `${leftPct}%`, transform: 'translateX(-50%)' }}
+                      >
+                        <span className="sr-only">🧠 思考</span>
+                      </button>
+                    )
+                  }
+
                   const bg = isResponse
                     ? 'bg-emerald-500/85'
-                    : isTool
-                      ? isDiv ? 'bg-red-500/85' : 'bg-blue-500/85'
-                      : 'bg-slate-500/70'
+                    : isDiv ? 'bg-red-500/85' : 'bg-blue-500/85'
                   const icon = isTool
                     ? getToolIcon(it.step.toolCall!.name)
-                    : isResponse ? '💬' : '🧠'
+                    : '💬'
                   const durLabel =
                     hasToolSpan && typeof it.toolEnd === 'number'
                       ? `${((it.toolEnd - it.toolStart!) / 1000).toFixed(1)}s`
@@ -870,7 +907,7 @@ function ComparisonTimeline({ columns }: { columns: AnyColumn[] }) {
                           : it.step.content.slice(0, 60)
                       }
                       className={[
-                        'absolute top-1/2 -translate-y-1/2 h-7 rounded text-[10px] text-white flex items-center gap-0.5 transition-all hover:brightness-125 hover:z-10 overflow-hidden',
+                        'absolute top-1/2 -translate-y-1/2 h-6 rounded text-[10px] text-white flex items-center gap-0.5 transition-all hover:brightness-125 hover:z-10 overflow-hidden',
                         widthPct ? 'px-1' : 'px-1.5',
                         bg,
                         isDiv ? 'ring-2 ring-red-300 z-[1]' : '',
@@ -897,7 +934,7 @@ function ComparisonTimeline({ columns }: { columns: AnyColumn[] }) {
 
       {/* legend */}
       <div className="mt-3 flex items-center gap-4 text-[10px] text-slate-500 flex-wrap">
-        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-slate-500/70 inline-block" />思考</span>
+        <span className="flex items-center gap-1"><span className="w-0.5 h-3 bg-slate-500/50 rounded-full inline-block" />思考</span>
         <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-blue-500/85 inline-block" />工具调用(条宽=耗时)</span>
         <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-emerald-500/85 inline-block" />最终回答</span>
         <span className="flex items-center gap-1"><span className="w-3 h-3 rounded ring-2 ring-red-300 bg-red-500/85 inline-block" />分歧调用</span>

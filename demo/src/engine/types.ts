@@ -228,6 +228,20 @@ export interface HighlightedConnection {
   messageId: string
 }
 
+/** A single token-usage sample for the context-growth timeline (live runs) */
+export interface ContextSample {
+  /** Display timestamp */
+  time: string
+  /** Which agent consumed these tokens */
+  agentId: string
+  /** Monotonic sample index */
+  seq: number
+  promptTokens: number
+  completionTokens: number
+  /** Cumulative total across all agents up to this sample */
+  cumulativeTotal: number
+}
+
 /** Snapshot of the entire multi-agent state at a given timeline index */
 export interface MultiAgentSnapshot {
   nodeStatuses: Record<string, MultiAgentStatus>
@@ -248,6 +262,12 @@ export interface MultiAgentEngineState {
   isPlaying: boolean
   /** Real token usage accumulated during a live run (omitted by the scripted engine) */
   usage?: { promptTokens: number; completionTokens: number }
+  /** Per-agent token usage breakdown (live runs only) */
+  perAgentUsage?: Record<string, { promptTokens: number; completionTokens: number }>
+  /** Timestamped usage samples for the context-growth timeline (live runs only) */
+  contextTimeline?: ContextSample[]
+  /** Model context window limit in tokens, for budget visualization */
+  contextWindowLimit?: number
 }
 
 /** Default initial multi-agent engine state */
@@ -260,6 +280,9 @@ export function createMultiAgentEngineState(): MultiAgentEngineState {
     totalEvents: 0,
     isPlaying: false,
     usage: { promptTokens: 0, completionTokens: 0 },
+    perAgentUsage: {},
+    contextTimeline: [],
+    contextWindowLimit: 131072,
   }
 }
 

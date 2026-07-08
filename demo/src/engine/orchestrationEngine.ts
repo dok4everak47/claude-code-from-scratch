@@ -18,6 +18,7 @@ import type {
   AgentNode,
   AgentStep,
   HighlightedConnection,
+  ContextSample,
   LiveToolDef,
 } from './types'
 import { liveTools } from './liveTools'
@@ -101,7 +102,14 @@ export class OrchestrationEngine {
   private topology: Topology = 'fan-out'
   private debateRounds = 2
   private usage: { promptTokens: number; completionTokens: number } = { promptTokens: 0, completionTokens: 0 }
-  private usageCb: (u: { prompt_tokens?: number; completion_tokens?: number }) => void = () => {}
+  /** Per-agent token usage breakdown */
+  private perAgentUsage: Record<string, { promptTokens: number; completionTokens: number }> = {}
+  /** Timestamped usage samples for the context-growth timeline */
+  private contextTimeline: ContextSample[] = []
+  /** Monotonic counter for context samples */
+  private contextSeq = 0
+  /** Model context window limit (tokens) — default 128K (DeepSeek) */
+  private contextWindowLimit = 131072
 
   constructor(cb: OrchestrationCallbacks) {
     this.onStateChange = cb.onStateChange
@@ -120,6 +128,9 @@ export class OrchestrationEngine {
     this.maxTurns = opts?.maxTurns ?? 4
     this.topology = opts?.topology ?? 'fan-out'
     this.usage = { promptTokens: 0, completionTokens: 0 }
+    this.perAgentUsage = {}
+    this.contextTimeline = []
+    this.contextSeq = 0
 
     const coordinator =
       scenario.nodes.find((n) => n.role === 'orchestrator') ?? scenario.nodes[0]
@@ -149,10 +160,9 @@ export class OrchestrationEngine {
     this.activeMessages = []
     this.statuses = {}
     this.usage = { promptTokens: 0, completionTokens: 0 }
-    this.usageCb = (u) => {
-      this.usage.promptTokens += u.prompt_tokens ?? 0
-      this.usage.completionTokens += u.completion_tokens ?? 0
-    }
+    this.perAgentUsage = {}
+    this.contextTimeline = []
+    this.contextSeq = 0
     for (const n of this.activeNodes) this.statuses[n.id] = 'pending'
     this.liveScenario = this.buildLiveScenario(this.roster, this.activeNodes)
     this.currentEventIndex = -1
@@ -263,6 +273,9 @@ export class OrchestrationEngine {
       this.activeMessages = []
       this.statuses = {}
       this.usage = { promptTokens: 0, completionTokens: 0 }
+      this.perAgentUsage = {}
+      this.contextTimeline = []
+      this.contextSeq = 0
       for (const n of this.activeNodes) this.statuses[n.id] = 'pending'
     }
     this.currentEventIndex = -1
@@ -303,6 +316,9 @@ export class OrchestrationEngine {
     this.liveScenario = data.scenario
     this.timeline = clone(data.timeline)
     this.usage = { ...data.usage }
+    this.perAgentUsage = {}
+    this.contextTimeline = []
+    this.contextSeq = 0
     this.statuses = {}
     for (const n of this.activeNodes) this.statuses[n.id] = 'pending'
     this.activeMessages = []
@@ -324,6 +340,9 @@ export class OrchestrationEngine {
       totalEvents: this.timeline.length,
       isPlaying: this.isPlaying,
       usage: { promptTokens: this.usage.promptTokens, completionTokens: this.usage.completionTokens },
+      perAgentUsage: { ...this.perAgentUsage },
+      contextTimeline: [...this.contextTimeline],
+      contextWindowLimit: this.contextWindowLimit,
     }
   }
 
@@ -378,7 +397,7 @@ ${specList}
         config,
         messages,
         [delegateTool],
-        { onTextDelta: () => {}, onUsage: this.usageCb },
+        { onTextDelta: () => {}, onUsage: (u) => this.recordUsage(coordinator.id, u) },
         this.abort?.signal,
         { toolChoice: 'required' },
       )
@@ -455,7 +474,7 @@ ${specList}
         tools: liveTools,
         maxTurns: this.maxTurns,
         signal: this.abort?.signal,
-        onUsage: this.usageCb,
+        onUsage: (u) => this.recordUsage(node.id, u),
         onToolStart: (tc) => {
           this.setStatus(node.id, 'using_tools')
           this.pushStep(node.id, {
@@ -563,7 +582,7 @@ ${resultText}
         tools: [],
         maxTurns: 4,
         signal: this.abort?.signal,
-        onUsage: this.usageCb,
+        onUsage: (u) => this.recordUsage(coordinator.id, u),
       })
     } catch (e) {
       if (e instanceof DOMException && e.name === 'AbortError') throw e
@@ -733,7 +752,7 @@ ${transcriptText}
         tools: liveTools,
         maxTurns: Math.min(this.maxTurns, 3),
         signal: this.abort?.signal,
-        onUsage: this.usageCb,
+        onUsage: (u) => this.recordUsage(debater.id, u),
       })
     } catch (e) {
       if (e instanceof DOMException && e.name === 'AbortError') throw e
@@ -767,7 +786,7 @@ ${transcriptText}
         tools: [],
         maxTurns: 4,
         signal: this.abort?.signal,
-        onUsage: this.usageCb,
+        onUsage: (u) => this.recordUsage(coordinator.id, u),
       })
     } catch (e) {
       if (e instanceof DOMException && e.name === 'AbortError') throw e
@@ -843,6 +862,36 @@ ${acc}`
       data: { status },
       description: `${id} → ${status}`,
     })
+  }
+
+  /**
+   * Record a token-usage sample from an LLM call.
+   * Accumulates into the aggregate total, the per-agent breakdown,
+   * and pushes a timestamped sample onto the context-growth timeline.
+   */
+  private recordUsage(
+    agentId: string,
+    u: { prompt_tokens?: number; completion_tokens?: number },
+  ): void {
+    const pt = u.prompt_tokens ?? 0
+    const ct = u.completion_tokens ?? 0
+    if (pt === 0 && ct === 0) return
+    this.usage.promptTokens += pt
+    this.usage.completionTokens += ct
+    const prev = this.perAgentUsage[agentId] ?? { promptTokens: 0, completionTokens: 0 }
+    this.perAgentUsage[agentId] = {
+      promptTokens: prev.promptTokens + pt,
+      completionTokens: prev.completionTokens + ct,
+    }
+    this.contextTimeline.push({
+      time: ts(),
+      agentId,
+      seq: this.contextSeq++,
+      promptTokens: pt,
+      completionTokens: ct,
+      cumulativeTotal: this.usage.promptTokens + this.usage.completionTokens,
+    })
+    this.emit()
   }
 
   private pushStep(nodeId: string, step: AgentStep): void {

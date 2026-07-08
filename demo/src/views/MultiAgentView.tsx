@@ -6,6 +6,7 @@
 //   [compare modal]
 // ============================================================
 
+import { useState } from 'react'
 import type { MultiAgentScenario, MultiAgentEngineState } from '@/engine/types'
 import type { Topology } from '@/engine/orchestrationEngine'
 import type { SavedRun } from '@/engine/runHistory'
@@ -13,6 +14,7 @@ import { extractFinalAnswer } from '@/engine/runHistory'
 import { Button } from '@/components/Button'
 import MultiAgentFlow from '@/components/MultiAgentFlow'
 import RunHistoryPanel from '@/components/RunHistoryPanel'
+import { ContextBudgetPanel } from '@/components/ContextBudgetPanel'
 
 interface CostEstimate {
   promptTokens: number
@@ -109,6 +111,14 @@ export function MultiAgentView({
 }: MultiAgentViewProps) {
   const activeScenarioId =
     runMode === 'demo' ? engineState.scenarioId : engineState.scenarioId
+
+  const [showContext, setShowContext] = useState(false)
+  const hasUsage =
+    !!usage &&
+    usage.promptTokens + usage.completionTokens > 0
+  const perAgentUsage = engineState.perAgentUsage ?? {}
+  const contextTimeline = engineState.contextTimeline ?? []
+  const contextWindowLimit = engineState.contextWindowLimit ?? 131072
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -260,6 +270,22 @@ export function MultiAgentView({
                   </span>
                 )}
 
+              {/* Context budget toggle */}
+              {hasUsage && (
+                <button
+                  type="button"
+                  onClick={() => setShowContext((v) => !v)}
+                  className={`text-[11px] px-2 py-1 rounded-full border transition-all duration-150 whitespace-nowrap ${
+                    showContext
+                      ? 'bg-violet-500/80 text-white border-violet-500'
+                      : 'bg-slate-800 text-slate-400 border-slate-700 hover:border-slate-600 hover:text-slate-300'
+                  }`}
+                  title="上下文窗口可视化"
+                >
+                  📊 上下文
+                </button>
+              )}
+
               {isOrchestrating ? (
                 <Button
                   variant="danger"
@@ -304,7 +330,7 @@ export function MultiAgentView({
       </div>
 
       {/* Main: MultiAgentFlow visualization */}
-      <main className="flex-1 min-h-0">
+      <main className="flex-1 min-h-0 relative">
         <MultiAgentFlow
           engineState={engineState}
           onNext={onNext}
@@ -313,6 +339,29 @@ export function MultiAgentView({
           onPause={onPause}
           onReset={onReset}
         />
+
+        {/* Context budget overlay panel */}
+        {showContext && hasUsage && (
+          <div className="absolute top-3 right-3 w-72 max-w-[calc(100vw-2rem)] z-30 max-h-[calc(100%-1.5rem)] overflow-y-auto">
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setShowContext(false)}
+                className="absolute -top-1 -right-1 z-10 w-5 h-5 flex items-center justify-center rounded-full bg-slate-700 hover:bg-slate-600 text-slate-300 text-[10px] ring-1 ring-white/10"
+                title="关闭"
+              >
+                ✕
+              </button>
+              <ContextBudgetPanel
+                usage={usage!}
+                perAgentUsage={perAgentUsage}
+                contextTimeline={contextTimeline}
+                contextWindowLimit={contextWindowLimit}
+                scenario={engineState.scenario}
+              />
+            </div>
+          </div>
+        )}
       </main>
 
       {/* Run comparison modal */}

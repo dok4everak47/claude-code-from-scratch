@@ -90,6 +90,10 @@ export function ScenarioView({
               steps={steps}
               currentStepIndex={currentStepIndex}
               onStepClick={onJumpTo}
+              graphIsPlaying={scenarioState.isPlaying}
+              graphOnTogglePlay={() =>
+                scenarioState.isPlaying ? onPause() : onPlay()
+              }
             />
           </div>
         </section>

@@ -91,6 +91,12 @@ export default function App() {
   const comparisonAgentRef = useRef<ComparisonAgent | null>(null)
   const [comparisonDraft, setComparisonDraft] = useState('')
   const [comparisonSubMode, setComparisonSubMode] = useState<'summary' | 'timeline'>('summary')
+  /**
+   * While a run is live we auto-follow its timeline and auto-return to summary
+   * when it finishes. This flag is cleared the moment the user manually
+   * switches sub-mode, so inspecting a finished run's timeline stays put.
+   */
+  const comparisonAutoFollowRef = useRef(false)
   /** Per-column model overrides for the comparison mode ('' = follow global). */
   const [comparisonColumnModels, setComparisonColumnModels] = useState<Record<string, string>>({})
 
@@ -321,6 +327,7 @@ export default function App() {
     if (!text || comparisonState.isRunning) return
     setComparisonDraft('')
     setComparisonSubMode('timeline')
+    comparisonAutoFollowRef.current = true
     comparisonAgentRef.current?.setColumnModels(comparisonColumnModels)
     comparisonAgentRef.current?.setActiveKeys(comparisonKeys)
     comparisonAgentRef.current?.run(text)
@@ -346,13 +353,24 @@ export default function App() {
     comparisonAgentRef.current?.stop(index)
   }, [])
 
-  // Auto-switch to summary when all columns finish
+  // Manual sub-mode switch — clears auto-follow so the view stays where the
+  // user put it (no auto-return to summary while inspecting a finished run).
+  const handleComparisonSubModeChange = useCallback((m: 'summary' | 'timeline') => {
+    comparisonAutoFollowRef.current = false
+    setComparisonSubMode(m)
+  }, [])
+
+  // Auto-switch to summary once a live run finishes (only while auto-following)
   useEffect(() => {
     if (comparisonSubMode === 'timeline' &&
         !comparisonState.isRunning &&
-        comparisonState.columns.some((c) => c.steps.length > 0)) {
+        comparisonState.columns.some((c) => c.steps.length > 0) &&
+        comparisonAutoFollowRef.current) {
       // Small delay so the last streaming state renders before switching
-      const timer = setTimeout(() => setComparisonSubMode('summary'), 800)
+      const timer = setTimeout(() => {
+        comparisonAutoFollowRef.current = false
+        setComparisonSubMode('summary')
+      }, 800)
       return () => clearTimeout(timer)
     }
   }, [comparisonState.isRunning, comparisonSubMode])
@@ -416,6 +434,7 @@ export default function App() {
     setComparisonColumnModels(models)
     // Directly run - don't wait for state to flush
     setComparisonSubMode('timeline')
+    comparisonAutoFollowRef.current = true
     comparisonAgentRef.current?.setColumnModels(models)
     comparisonAgentRef.current?.setActiveKeys(entry.columns.map((c) => c.key as ComparisonKey))
     comparisonAgentRef.current?.run(entry.userMessage)
@@ -724,7 +743,7 @@ export default function App() {
           comparisonDraft={comparisonDraft}
           onDraftChange={setComparisonDraft}
           comparisonSubMode={comparisonSubMode}
-          onSubModeChange={setComparisonSubMode}
+          onSubModeChange={handleComparisonSubModeChange}
           comparisonHistory={comparisonHistory}
           viewingHistory={viewingHistory}
           historyOpen={historyOpen}

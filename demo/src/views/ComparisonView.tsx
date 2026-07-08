@@ -710,9 +710,16 @@ function computeDivergentToolIds(
 function normalizeColumns(columns: AnyColumn[]): TimelineColumn[] {
   return columns.map((col) => {
     const live = isLiveCol(col) ? col : null
-    const steps = live ? live.steps : []
-    const baseStart = live ? live.startTime ?? 0 : 0
-    const baseEnd = live ? live.endTime ?? 0 : (col as HistoryColumnData).durationMs || 0
+    const steps = col.steps
+    const stepMs = steps
+      .map((s) => (typeof s.ms === 'number' ? s.ms : NaN))
+      .filter((n) => !Number.isNaN(n))
+    const stepMin = stepMs.length > 0 ? Math.min(...stepMs) : 0
+    const stepMax = stepMs.length > 0 ? Math.max(...stepMs) : 0
+    const baseStart = live ? live.startTime ?? stepMin : stepMin
+    const baseEnd = live
+      ? live.endTime ?? stepMax
+      : Math.max(stepMax, (col as HistoryColumnData).durationMs || 0)
     const items: TimelineItem[] = steps.map((s, i) => ({
       step: s,
       ms: typeof s.ms === 'number' ? s.ms : steps.length <= 1 ? baseStart : baseStart + (i / (steps.length - 1)) * (baseEnd - baseStart),

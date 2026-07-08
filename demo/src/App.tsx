@@ -50,8 +50,22 @@ export default function App() {
 
   // Persist active tab to localStorage
   useEffect(() => {
-    localStorage.setItem('agent-demo-active-mode', mode)
-  }, [mode])
+    localStorage.setItem('agent-demo-active-mode', mode)  }, [mode])
+
+  // ---- Theme (dark / light) ----
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    try {
+      const t = localStorage.getItem('agent-demo-theme')
+      if (t === 'light' || t === 'dark') return t
+    } catch { /* ignore */ }
+    return 'dark'
+  })
+  useEffect(() => {
+    const root = document.documentElement
+    root.classList.toggle('theme-light', theme === 'light')
+    try { localStorage.setItem('agent-demo-theme', theme) } catch { /* ignore */ }
+  }, [theme])
+  const toggleTheme = useCallback(() => setTheme((t) => (t === 'dark' ? 'light' : 'dark')), [])
 
   // ---- API Config ----
   const [apiConfig, setApiConfig] = useState<ApiConfig>(() => {
@@ -603,7 +617,7 @@ export default function App() {
   // ============================================================
 
   return (
-    <AppShell mode={mode} onModeChange={setMode} rightSlot={rightSlot} subHeader={
+    <AppShell mode={mode} onModeChange={setMode} rightSlot={rightSlot} theme={theme} onToggleTheme={toggleTheme} subHeader={
       !isDeployed ? (
         <ApiSettings
           config={apiConfig}

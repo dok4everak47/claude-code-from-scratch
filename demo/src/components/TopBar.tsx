@@ -3,6 +3,7 @@
 // ============================================================
 
 import type { ReactNode } from 'react'
+import { SunIcon, MoonIcon } from '@heroicons/react/24/outline'
 
 export type AppMode = 'scenario' | 'live' | 'comparison' | 'multiAgent'
 
@@ -17,9 +18,13 @@ interface TopBarProps {
   mode: AppMode
   onModeChange: (mode: AppMode) => void
   rightSlot?: ReactNode
+  /** Current theme; drives the sun/moon toggle icon */
+  theme?: 'dark' | 'light'
+  /** Toggle between dark and light */
+  onToggleTheme?: () => void
 }
 
-export function TopBar({ mode, onModeChange, rightSlot }: TopBarProps) {
+export function TopBar({ mode, onModeChange, rightSlot, theme = 'dark', onToggleTheme }: TopBarProps) {
   return (
     <header className="flex-shrink-0 border-b border-slate-700/50 bg-slate-950/80 backdrop-blur-sm px-4 py-3">
       <div className="flex items-center gap-4">
@@ -45,7 +50,20 @@ export function TopBar({ mode, onModeChange, rightSlot }: TopBarProps) {
             )
           })}
         </nav>
-        {rightSlot && <div className="ml-auto flex items-center">{rightSlot}</div>}
+        <div className="ml-auto flex items-center gap-2">
+          {rightSlot}
+          {onToggleTheme && (
+            <button
+              type="button"
+              onClick={onToggleTheme}
+              aria-label={theme === 'light' ? '切换到深色模式' : '切换到浅色模式'}
+              title={theme === 'light' ? '切换到深色模式' : '切换到浅色模式'}
+              className="flex-shrink-0 grid place-items-center w-9 h-9 rounded-full bg-slate-800 text-slate-400 border border-slate-700/50 hover:text-slate-100 hover:bg-slate-700 transition-all duration-150"
+            >
+              {theme === 'light' ? <MoonIcon className="w-5 h-5" /> : <SunIcon className="w-5 h-5" />}
+            </button>
+          )}
+        </div>
       </div>
     </header>
   )

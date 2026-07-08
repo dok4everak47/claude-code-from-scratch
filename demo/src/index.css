@@ -28,6 +28,114 @@ body {
     radial-gradient(36rem 36rem at 5% 95%, rgb(16 185 129 / 0.07), transparent 55%);
 }
 
+/* ============================================================ */
+/* Light theme — toggled by adding .theme-light to <html>      */
+/* Centralized overrides only; no component files touched.     */
+/* ============================================================ */
+html.theme-light {
+  color-scheme: light;
+  background-color: #f1f5f9;
+}
+html.theme-light body {
+  background-color: #f1f5f9;
+}
+
+/* Page / surface backgrounds (invert luminance, keep elevation) */
+.theme-light .bg-slate-950 { background-color: #f1f5f9; }
+.theme-light .bg-slate-950\/80 { background-color: rgb(241 245 249 / 0.85); }
+.theme-light .bg-slate-900 { background-color: #ffffff; }
+.theme-light .bg-slate-900\/95 { background-color: rgb(255 255 255 / 0.97); }
+.theme-light .bg-slate-900\/90 { background-color: rgb(255 255 255 / 0.95); }
+.theme-light .bg-slate-900\/80 { background-color: rgb(255 255 255 / 0.9); }
+.theme-light .bg-slate-900\/70 { background-color: rgb(255 255 255 / 0.72); }
+.theme-light .bg-slate-900\/60 { background-color: rgb(255 255 255 / 0.65); }
+.theme-light .bg-slate-900\/50 { background-color: rgb(255 255 255 / 0.6); }
+.theme-light .bg-slate-900\/40 { background-color: rgb(255 255 255 / 0.5); }
+.theme-light .bg-slate-900\/30 { background-color: rgb(255 255 255 / 0.4); }
+.theme-light .bg-slate-800 { background-color: #f8fafc; }
+.theme-light .bg-slate-800\/80 { background-color: rgb(248 250 252 / 0.85); }
+.theme-light .bg-slate-800\/70 { background-color: rgb(248 250 252 / 0.75); }
+.theme-light .bg-slate-800\/60 { background-color: rgb(248 250 252 / 0.7); }
+.theme-light .bg-slate-800\/50 { background-color: rgb(248 250 252 / 0.6); }
+.theme-light .bg-slate-800\/40 { background-color: rgb(248 250 252 / 0.55); }
+.theme-light .bg-slate-800\/30 { background-color: rgb(248 250 252 / 0.5); }
+.theme-light .bg-slate-700 { background-color: #e2e8f0; }
+.theme-light .bg-slate-700\/80 { background-color: rgb(226 232 240 / 0.85); }
+.theme-light .bg-slate-700\/50 { background-color: rgb(226 232 240 / 0.6); }
+.theme-light .bg-slate-700\/40 { background-color: rgb(226 232 240 / 0.5); }
+.theme-light .bg-slate-500 { background-color: #cbd5e1; }
+.theme-light .bg-slate-400 { background-color: #cbd5e1; }
+
+/* Hover states */
+.theme-light .hover\:bg-slate-700:hover { background-color: #e2e8f0; }
+.theme-light .hover\:bg-slate-800:hover { background-color: #f1f5f9; }
+.theme-light .hover\:bg-slate-800\/50:hover { background-color: rgb(241 245 249 / 0.6); }
+.theme-light .hover\:bg-slate-700\/50:hover { background-color: rgb(226 232 240 / 0.6); }
+
+/* Text (dark text on light) */
+.theme-light .text-slate-100 { color: #0f172a; }
+.theme-light .text-slate-300 { color: #334155; }
+.theme-light .text-slate-400 { color: #475569; }
+
+/* Borders */
+.theme-light .border-slate-700\/50 { border-color: rgb(203 213 225 / 0.7); }
+.theme-light .border-slate-700 { border-color: #cbd5e1; }
+.theme-light .border-slate-700\/30 { border-color: rgb(203 213 225 / 0.4); }
+.theme-light .border-slate-700\/40 { border-color: rgb(203 213 225 / 0.5); }
+.theme-light .border-slate-700\/60 { border-color: rgb(203 213 225 / 0.8); }
+.theme-light .border-slate-700\/20 { border-color: rgb(203 213 225 / 0.3); }
+.theme-light .border-slate-600 { border-color: #94a3b8; }
+.theme-light .border-slate-600\/40 { border-color: rgb(148 163 184 / 0.5); }
+.theme-light .border-slate-600\/30 { border-color: rgb(148 163 184 / 0.4); }
+.theme-light .border-slate-500 { border-color: #94a3b8; }
+.theme-light .border-slate-400\/30 { border-color: rgb(203 213 225 / 0.4); }
+
+/* Accent text — darken for contrast on white */
+.theme-light .text-red-400,
+.theme-light .text-red-300 { color: #dc2626; }
+.theme-light .text-emerald-400,
+.theme-light .text-emerald-300,
+.theme-light .text-emerald-400\/80 { color: #059669; }
+.theme-light .text-yellow-400,
+.theme-light .text-yellow-300,
+.theme-light .text-yellow-300\/70 { color: #a16207; }
+.theme-light .text-blue-400,
+.theme-light .text-blue-300,
+.theme-light .text-blue-200,
+.theme-light .text-blue-200\/70 { color: #2563eb; }
+.theme-light .text-violet-400,
+.theme-light .text-violet-200 { color: #7c3aed; }
+
+/* Accent tint backgrounds — dark-900 tints -> light-100 tints */
+.theme-light .bg-blue-900\/30,
+.theme-light .bg-blue-900\/50,
+.theme-light .bg-blue-900\/40,
+.theme-light .bg-blue-900\/10 { background-color: #dbeafe; }
+.theme-light .bg-red-900\/50 { background-color: #fee2e2; }
+.theme-light .bg-emerald-900\/20,
+.theme-light .bg-emerald-900\/30,
+.theme-light .bg-emerald-900\/50,
+.theme-light .bg-emerald-900\/15,
+.theme-light .bg-emerald-900\/10 { background-color: #d1fae5; }
+.theme-light .bg-yellow-900,
+.theme-light .bg-yellow-900\/30,
+.theme-light .bg-yellow-900\/40,
+.theme-light .bg-yellow-900\/20,
+.theme-light .bg-yellow-900\/10 { background-color: #fef9c3; }
+.theme-light .bg-violet-900\/20,
+.theme-light .bg-violet-900\/40,
+.theme-light .bg-violet-900\/30,
+.theme-light .bg-violet-900\/15,
+.theme-light .bg-violet-900\/10 { background-color: #ede9fe; }
+
+/* Ambient glow — softer, lighter tints */
+.theme-light .ambient-glow {
+  background:
+    radial-gradient(48rem 48rem at 50% -15%, rgb(59 130 246 / 0.07), transparent 55%),
+    radial-gradient(42rem 42rem at 95% 105%, rgb(139 92 246 / 0.07), transparent 55%),
+    radial-gradient(36rem 36rem at 5% 95%, rgb(16 185 129 / 0.05), transparent 55%);
+}
+
 #root {
   min-height: 100vh;
 }

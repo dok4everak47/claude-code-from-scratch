@@ -40,14 +40,18 @@ export default function AgentFlow({
   graphIsStreaming,
 }: AgentFlowProps) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const bottomRef = useRef<HTMLDivElement>(null)
 
-  // Auto-scroll to bottom when new steps appear in live mode
+  // Auto-scroll so the active step stays in view — follows the dependency
+  // graph's auto-play / scenario scrub / live tail. This keeps the thinking
+  // timeline in sync with the highlighted node above it.
   useEffect(() => {
-    if (isLive && bottomRef.current) {
-      bottomRef.current.scrollIntoView({ behavior: 'smooth' })
+    const root = containerRef.current
+    if (!root) return
+    const el = root.querySelector<HTMLElement>('[data-step-current="true"]')
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }
-  }, [steps.length, isLive])
+  }, [currentStepIndex, steps.length])
 
   if (steps.length === 0) {
     return (
@@ -93,6 +97,7 @@ export default function AgentFlow({
             return (
               <div
                 key={step.id}
+                data-step-current={isCurrent ? 'true' : 'false'}
                 className={`relative transition-all duration-500 step-enter ${
                   isPending ? 'opacity-30' : 'opacity-100'
                 }`}
@@ -156,9 +161,6 @@ export default function AgentFlow({
               </div>
             )
           })}
-
-          {/* Invisible sentinel for auto-scroll */}
-          <div ref={bottomRef} />
         </div>
       </div>
     </div>

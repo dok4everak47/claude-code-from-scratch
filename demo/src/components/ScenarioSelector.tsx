@@ -18,42 +18,33 @@ export default function ScenarioSelector({
   disabled = false,
 }: ScenarioSelectorProps) {
   return (
-    <div className="flex items-center gap-3">
-      <label className="text-sm font-medium text-slate-400 whitespace-nowrap">
-        📋 场景选择
-      </label>
-      <div className="relative flex-1">
-        <select
-          value={activeScenarioId ?? ''}
-          onChange={(e) => {
-            const found = scenarios.find((s) => s.id === e.target.value)
-            if (found) onSelect(found)
-          }}
-          disabled={disabled}
-          className="
-            w-full appearance-none bg-slate-800 border border-slate-700 rounded-lg
-            px-3 py-1.5 text-sm text-slate-200
-            focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500
-            disabled:opacity-50 disabled:cursor-not-allowed
-            cursor-pointer
-          "
-        >
-          <option value="" disabled>
-            选择场景...
-          </option>
-          {scenarios.map((s) => (
-            <option key={s.id} value={s.id}>
+    <div className="flex items-center gap-2 min-w-0">
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 flex-1 min-w-0">
+        {scenarios.map((s) => {
+          const active = s.id === activeScenarioId
+          return (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => onSelect(s)}
+              disabled={disabled}
+              className={`
+                flex-shrink-0 px-3 py-1.5 text-xs font-medium rounded-full transition-all duration-150 whitespace-nowrap
+                ${active
+                  ? 'bg-blue-500 text-white shadow-lg shadow-blue-500/20'
+                  : 'bg-slate-800 text-slate-400 border border-slate-700/50 hover:text-slate-100 hover:bg-slate-700'
+                }
+                disabled:opacity-40 disabled:cursor-not-allowed
+              `}
+            >
               {s.name}
-            </option>
-          ))}
-        </select>
-        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none text-xs">
-          ▼
-        </span>
+            </button>
+          )
+        })}
       </div>
       {/* Description */}
       {activeScenarioId && (
-        <p className="text-xs text-slate-500 hidden lg:block max-w-xs truncate">
+        <p className="text-xs text-slate-500 hidden lg:block max-w-xs truncate flex-shrink-0">
           {scenarios.find((s) => s.id === activeScenarioId)?.description}
         </p>
       )}

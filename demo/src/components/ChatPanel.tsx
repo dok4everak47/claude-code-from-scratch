@@ -5,6 +5,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type { ChatMessage, LiveMessage } from '@/engine/types'
+import { Button } from './Button'
 
 interface ChatPanelBaseProps {
   /** 'scenario' = original pre-recorded mode, 'live' = real LLM interaction */
@@ -101,22 +102,19 @@ function ScenarioChat({
             placeholder="输入消息（演示模式）..."
             className="
               flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2
-              text-sm text-slate-200 placeholder-slate-500
+              text-sm text-slate-100 placeholder-slate-500
               focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500
             "
           />
-          <button
+          <Button
             type="button"
+            variant="primary"
+            size="md"
             onClick={handleSend}
             disabled={!draft.trim()}
-            className="
-              px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700
-              text-white text-sm font-medium rounded-lg
-              transition-colors disabled:cursor-not-allowed
-            "
           >
             发送
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -192,30 +190,25 @@ function LiveChat({
             disabled={isLiveLoading}
             className="
               flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2
-              text-sm text-slate-200 placeholder-slate-500 resize-none
+              text-sm text-slate-100 placeholder-slate-500 resize-none
               focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500
               disabled:opacity-50 disabled:cursor-not-allowed
             "
           />
-          <button
+          <Button
             type="button"
+            variant="primary"
+            size="md"
             onClick={handleSend}
             disabled={!draft.trim() || isLiveLoading}
-            className="
-              px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700
-              text-white text-sm font-medium rounded-lg
-              transition-colors disabled:cursor-not-allowed flex-shrink-0
-            "
-          >
-            {isLiveLoading ? (
-              <span className="flex items-center gap-1">
+            leftIcon={
+              isLiveLoading ? (
                 <span className="spin inline-block w-3 h-3 border-2 border-white/30 border-t-white rounded-full" />
-                思考中
-              </span>
-            ) : (
-              '发送'
-            )}
-          </button>
+              ) : undefined
+            }
+          >
+            {isLiveLoading ? '思考中' : '发送'}
+          </Button>
         </div>
       </div>
     </div>
@@ -241,7 +234,7 @@ function MessageBubble({
         className={`
           max-w-[85%] rounded-2xl px-4 py-2.5
           ${role === 'user'
-            ? 'bg-blue-600 text-white rounded-br-md'
+            ? 'bg-blue-500 text-white rounded-br-md'
             : 'bg-slate-800 border border-slate-700 text-slate-100 rounded-bl-md'
           }
         `}
@@ -316,7 +309,7 @@ function LiveMessageBubble({ message }: { message: LiveMessage }) {
         className={`
           max-w-[85%] rounded-2xl px-4 py-2.5
           ${message.role === 'user'
-            ? 'bg-blue-600 text-white rounded-br-md'
+            ? 'bg-blue-500 text-white rounded-br-md'
             : 'bg-slate-800 border border-slate-700 text-slate-100 rounded-bl-md'
           }
         `}

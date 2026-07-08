@@ -4,6 +4,14 @@
 
 import { useState } from 'react'
 import type { ToolCall, ToolStatus } from '@/engine/types'
+import { Badge } from './Badge'
+
+const TOOL_BADGE_VARIANT: Record<ToolStatus, 'default' | 'success' | 'warning' | 'error'> = {
+  pending: 'default',
+  running: 'warning',
+  success: 'success',
+  error: 'error',
+}
 
 const STATUS_CONFIG: Record<
   ToolStatus,
@@ -20,21 +28,21 @@ const STATUS_CONFIG: Record<
     label: '执行中',
     bg: 'bg-yellow-900/20',
     text: 'text-yellow-400',
-    border: 'border-yellow-700/50',
+    border: 'border-yellow-500/50',
     dot: 'bg-yellow-400 pulse-dot',
   },
   success: {
     label: '成功',
     bg: 'bg-emerald-900/20',
     text: 'text-emerald-400',
-    border: 'border-emerald-700/50',
+    border: 'border-emerald-500/50',
     dot: 'bg-emerald-400',
   },
   error: {
     label: '失败',
-    bg: 'bg-red-900/20',
+    bg: 'bg-red-500/15',
     text: 'text-red-400',
-    border: 'border-red-700/50',
+    border: 'border-red-500/50',
     dot: 'bg-red-400',
   },
 }
@@ -77,9 +85,6 @@ export default function ToolCard({ toolCall, isActive }: ToolCardProps) {
         onClick={() => setExpanded(!expanded)}
         className="w-full flex items-center gap-3 px-3 py-2.5 text-left cursor-pointer hover:opacity-80 transition-opacity"
       >
-        {/* Status dot */}
-        <span className={`w-2 h-2 rounded-full flex-shrink-0 ${cfg.dot}`} />
-
         {/* Tool icon */}
         <span className="text-lg flex-shrink-0">
           {toolCall.name === 'get_weather'
@@ -103,9 +108,9 @@ export default function ToolCard({ toolCall, isActive }: ToolCardProps) {
             <code className="text-sm font-semibold text-slate-100 truncate">
               {toolCall.name}
             </code>
-            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${cfg.bg} ${cfg.text}`}>
+            <Badge variant={TOOL_BADGE_VARIANT[toolCall.status]} dot={false}>
               {cfg.label}
-            </span>
+            </Badge>
           </div>
           <p className="text-xs text-slate-400 truncate mt-0.5">{toolCall.description}</p>
         </div>
@@ -154,7 +159,7 @@ export default function ToolCard({ toolCall, isActive }: ToolCardProps) {
               <div className="text-[10px] font-semibold text-red-400 uppercase tracking-wider mb-1">
                 Error
               </div>
-              <pre className="text-xs text-red-300 bg-red-900/20 rounded p-2 overflow-x-auto">
+              <pre className="text-xs text-red-300 bg-red-500/15 rounded p-2 overflow-x-auto">
                 {toolCall.error}
               </pre>
             </div>

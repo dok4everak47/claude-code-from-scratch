@@ -59,7 +59,7 @@ export default function StepTimeline({ steps, currentStepIndex, onStepClick }: S
               title={step.content}
               className={`
                 flex flex-col items-center gap-0.5 flex-shrink-0
-                transition-all duration-200 rounded-lg px-2 py-1
+                transition-all duration-200 rounded-full px-2 py-1
                 ${isCurrent ? 'bg-blue-500/20 scale-110' : ''}
                 ${isCompleted && !isCurrent ? 'hover:bg-slate-800/50 cursor-pointer' : ''}
                 ${isPending ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}

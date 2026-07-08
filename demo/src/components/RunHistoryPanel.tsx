@@ -47,7 +47,7 @@ export default function RunHistoryPanel({
           🕘 运行历史 ({runs.length})
         </button>
         {viewingRunId && (
-          <span className="flex items-center gap-2 px-2 py-0.5 rounded-full bg-violet-700/30 text-violet-200 text-[11px]">
+          <span className="flex items-center gap-2 px-2 py-0.5 rounded-full bg-violet-500/30 text-violet-200 text-[11px]">
             正在查看历史记录
             <button type="button" onClick={onExit} className="underline hover:text-white">
               退出
@@ -59,7 +59,7 @@ export default function RunHistoryPanel({
             <button
               type="button"
               onClick={onCompare}
-              className="px-2 py-1 text-[11px] rounded-md bg-sky-700 hover:bg-sky-600 text-white"
+              className="px-2 py-1 text-[11px] rounded-md bg-blue-500 hover:bg-blue-500 text-white"
             >
               对比所选
             </button>

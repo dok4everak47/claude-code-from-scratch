@@ -2,9 +2,10 @@
 // AgentFlow — vertical timeline showing agent thinking process
 // ============================================================
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import type { AgentStep, AgentStatusFeed } from '@/engine/types'
 import ToolCard from './ToolCard'
+import { Panel } from './Panel'
 
 interface AgentFlowProps {
   steps: AgentStep[]
@@ -91,7 +92,7 @@ export default function AgentFlow({ steps, currentStepIndex, isLive = false, onS
                       rounded-lg border px-3 py-2.5
                       transition-all duration-300
                       ${isCurrent
-                        ? 'bg-violet-900/20 border-violet-700/50 ring-2 ring-violet-500/30'
+                        ? 'bg-violet-900/20 border-violet-500/50 ring-2 ring-violet-500/30'
                         : 'bg-slate-800/30 border-slate-700/30'
                       }
                     `}
@@ -112,7 +113,7 @@ export default function AgentFlow({ steps, currentStepIndex, isLive = false, onS
                       rounded-lg border px-3 py-2.5
                       transition-all duration-300
                       ${isCurrent
-                        ? 'bg-emerald-900/20 border-emerald-700/50 ring-2 ring-emerald-500/30'
+                        ? 'bg-emerald-900/20 border-emerald-500/50 ring-2 ring-emerald-500/30'
                         : 'bg-slate-800/30 border-slate-700/30'
                       }
                     `}
@@ -304,21 +305,21 @@ function getNodeColors(
   if (isPending) return 'bg-slate-800/30 border-slate-700/40 opacity-40'
 
   if (step.type === 'thought') {
-    if (isCurrent) return 'bg-violet-900/30 border-violet-600/60'
-    return 'bg-violet-900/15 border-violet-700/30'
+    if (isCurrent) return 'bg-violet-900/30 border-violet-500/60'
+    return 'bg-violet-900/15 border-violet-500/30'
   }
 
   if (step.type === 'response') {
-    if (isCurrent) return 'bg-emerald-900/30 border-emerald-600/60'
-    return 'bg-emerald-900/15 border-emerald-700/30'
+    if (isCurrent) return 'bg-emerald-900/30 border-emerald-500/60'
+    return 'bg-emerald-900/15 border-emerald-500/30'
   }
 
   // tool_call — color by status
   const status = step.toolCall?.status
-  if (status === 'success') return 'bg-emerald-900/20 border-emerald-600/40'
-  if (status === 'error') return 'bg-red-900/30 border-red-600/50'
-  if (status === 'running') return 'bg-yellow-900/30 border-yellow-600/50 tool-card-running'
-  if (isCurrent) return 'bg-blue-900/30 border-blue-600/50'
+  if (status === 'success') return 'bg-emerald-900/20 border-emerald-500/40'
+  if (status === 'error') return 'bg-red-500/15 border-red-500/50'
+  if (status === 'running') return 'bg-yellow-900/30 border-yellow-500/50 tool-card-running'
+  if (isCurrent) return 'bg-blue-900/30 border-blue-500/50'
   return 'bg-slate-800/40 border-slate-600/40'
 }
 
@@ -383,92 +384,82 @@ function Arrow({ isActive, isToCurrent }: { isActive: boolean; isToCurrent: bool
 // ============================================================
 
 function StatusFeedPanel({ feed }: { feed: AgentStatusFeed }) {
-  const [open, setOpen] = useState(true)
+  const title = (
+    <div className="flex items-center gap-1.5 normal-case">
+      <span>📊</span>
+      <span className="font-medium text-slate-300">Agent Status</span>
+      <span className="text-slate-500 normal-case">Loop: {feed.loopCount}</span>
+      {feed.linterActive && <span className="text-red-400 normal-case">🔧 Lint: FAIL</span>}
+    </div>
+  )
 
   return (
-    <div className="flex-shrink-0 border-b border-slate-700/30 bg-slate-800/40">
-      {/* Header — click to collapse */}
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors"
-      >
-        <span className="flex items-center gap-1.5">
-          <span>📊</span>
-          <span className="font-medium text-slate-300">Agent Status</span>
-          <span className="text-slate-500">Loop: {feed.loopCount}</span>
-          {feed.linterActive && <span className="text-red-400">🔧 Lint: FAIL</span>}
-        </span>
-        <span className={`transition-transform ${open ? '' : 'rotate-180'}`}>▼</span>
-      </button>
+    <Panel title={title} collapsible defaultOpen>
+      <div className="space-y-2 text-xs">
+        {/* Loop count */}
+        <div className="flex items-center gap-2">
+          <span className="text-slate-500 w-16">🔄 Loop</span>
+          <span className="text-slate-100 font-mono">{feed.loopCount}</span>
+        </div>
 
-      {open && (
-        <div className="px-3 pb-2 space-y-2 text-xs">
-          {/* Loop count */}
-          <div className="flex items-center gap-2">
-            <span className="text-slate-500 w-16">🔄 Loop</span>
-            <span className="text-slate-200 font-mono">{feed.loopCount}</span>
+        {/* File tree */}
+        {feed.fileTree.length > 0 && (
+          <div>
+            <div className="flex items-center gap-1 text-slate-500 mb-0.5">
+              <span>📁</span>
+              <span>Files</span>
+            </div>
+            <div className="ml-4 space-y-0.5">
+              {feed.fileTree.map((f, i) => (
+                <div key={i} className="flex items-center gap-1.5">
+                  <FileStatusBadge status={f.status} />
+                  <span className="text-slate-300 truncate max-w-[200px]">{f.path}</span>
+                </div>
+              ))}
+            </div>
           </div>
+        )}
 
-          {/* File tree */}
-          {feed.fileTree.length > 0 && (
-            <div>
-              <div className="flex items-center gap-1 text-slate-500 mb-0.5">
-                <span>📁</span>
-                <span>Files</span>
-              </div>
-              <div className="ml-4 space-y-0.5">
-                {feed.fileTree.map((f, i) => (
-                  <div key={i} className="flex items-center gap-1.5">
-                    <FileStatusBadge status={f.status} />
-                    <span className="text-slate-300 truncate max-w-[200px]">{f.path}</span>
-                  </div>
-                ))}
-              </div>
+        {/* Task list */}
+        {feed.taskList.length > 0 && (
+          <div>
+            <div className="flex items-center gap-1 text-slate-500 mb-0.5">
+              <span>📋</span>
+              <span>Tasks</span>
             </div>
-          )}
-
-          {/* Task list */}
-          {feed.taskList.length > 0 && (
-            <div>
-              <div className="flex items-center gap-1 text-slate-500 mb-0.5">
-                <span>📋</span>
-                <span>Tasks</span>
-              </div>
-              <div className="ml-4 space-y-0.5">
-                {feed.taskList.map((t, i) => (
-                  <div key={i} className="flex items-center gap-1.5">
-                    <TaskStatusIcon status={t.status} />
-                    <span className="text-slate-300 truncate max-w-[220px]">{t.name}</span>
-                  </div>
-                ))}
-              </div>
+            <div className="ml-4 space-y-0.5">
+              {feed.taskList.map((t, i) => (
+                <div key={i} className="flex items-center gap-1.5">
+                  <TaskStatusIcon status={t.status} />
+                  <span className="text-slate-300 truncate max-w-[220px]">{t.name}</span>
+                </div>
+              ))}
             </div>
-          )}
+          </div>
+        )}
 
-          {/* Git state */}
-          {feed.gitState && (
-            <div className="flex items-center gap-2">
-              <span className="text-slate-500">📦 Git</span>
-              <span className="text-slate-300">{feed.gitState.branch}</span>
-              {feed.gitState.dirtyCount > 0 && (
-                <span className="text-yellow-400">({feed.gitState.dirtyCount} 个未提交)</span>
-              )}
-            </div>
-          )}
-
-          {/* Linter */}
+        {/* Git state */}
+        {feed.gitState && (
           <div className="flex items-center gap-2">
-            <span className="text-slate-500">🔧 Linter</span>
-            {feed.linterActive ? (
-              <span className="text-red-400">❌ FAIL</span>
-            ) : (
-              <span className="text-emerald-400">✅ PASS</span>
+            <span className="text-slate-500">📦 Git</span>
+            <span className="text-slate-300">{feed.gitState.branch}</span>
+            {feed.gitState.dirtyCount > 0 && (
+              <span className="text-yellow-400">({feed.gitState.dirtyCount} 个未提交)</span>
             )}
           </div>
+        )}
+
+        {/* Linter */}
+        <div className="flex items-center gap-2">
+          <span className="text-slate-500">🔧 Linter</span>
+          {feed.linterActive ? (
+            <span className="text-red-400">❌ FAIL</span>
+          ) : (
+            <span className="text-emerald-400">✅ PASS</span>
+          )}
         </div>
-      )}
-    </div>
+      </div>
+    </Panel>
   )
 }
 

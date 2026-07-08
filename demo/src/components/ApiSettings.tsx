@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { ApiConfig } from '@/engine/types'
 import { defaultApiConfig } from '@/engine/types'
+import { Button } from './Button'
 
 const LS_KEY = 'agent-demo-api-config'
 const PROVIDER_PRESETS: Record<ApiConfig['provider'], { baseUrl: string; model: string }> = {
@@ -129,7 +130,7 @@ export default function ApiSettings({ config, onChange, isOpen, onToggle }: ApiS
     <div className="border-b border-slate-700/50 bg-slate-900/95 backdrop-blur-sm px-4 py-3">
       <div className="max-w-2xl mx-auto space-y-3">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-slate-200">⚙️ API 设置</h3>
+          <h3 className="text-sm font-semibold text-slate-100">⚙️ API 设置</h3>
           <button
             type="button"
             onClick={onToggle}
@@ -148,7 +149,7 @@ export default function ApiSettings({ config, onChange, isOpen, onToggle }: ApiS
             <select
               value={config.provider}
               onChange={(e) => handleProviderChange(e.target.value as ApiConfig['provider'])}
-              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
             >
               <option value="openai">OpenAI</option>
               <option value="deepseek">DeepSeek</option>
@@ -166,7 +167,7 @@ export default function ApiSettings({ config, onChange, isOpen, onToggle }: ApiS
               value={config.model}
               onChange={(e) => update({ model: e.target.value })}
               placeholder="deepseek-v4-flash"
-              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
             />
           </div>
 
@@ -180,7 +181,7 @@ export default function ApiSettings({ config, onChange, isOpen, onToggle }: ApiS
               value={config.baseUrl}
               onChange={(e) => update({ baseUrl: e.target.value })}
               placeholder="https://api.deepseek.com"
-              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-sm text-slate-200 placeholder-slate-500 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-sm text-slate-100 placeholder-slate-500 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500/50"
             />
             <p className="text-[10px] text-slate-500 mt-1">
               支持任何 OpenAI 兼容接口（OpenAI / DeepSeek / 通义千问 / Kimi / Gemini 等）。Claude 暂不支持。
@@ -198,16 +199,15 @@ export default function ApiSettings({ config, onChange, isOpen, onToggle }: ApiS
                 value={config.apiKey}
                 onChange={(e) => update({ apiKey: e.target.value })}
                 placeholder="sk-..."
-                className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-sm text-slate-200 placeholder-slate-500 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-sm text-slate-100 placeholder-slate-500 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500/50"
               />
-              <button
-                type="button"
+              <Button
+                variant="secondary"
+                size="sm"
                 onClick={() => setShowKey(!showKey)}
-                className="px-2.5 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-slate-400 transition-colors flex-shrink-0"
-                title={showKey ? '隐藏' : '显示'}
               >
                 {showKey ? '🙈' : '👁'}
-              </button>
+              </Button>
             </div>
             <p className="text-[10px] text-slate-500 mt-1">
               Key 仅保存在浏览器 localStorage，不会发送给任何第三方
@@ -225,7 +225,7 @@ export default function ApiSettings({ config, onChange, isOpen, onToggle }: ApiS
               onChange={(e) => update({ maxTurns: Math.max(1, Math.min(50, Number(e.target.value) || 10)) })}
               min={1}
               max={50}
-              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
             />
           </div>
 
@@ -238,28 +238,28 @@ export default function ApiSettings({ config, onChange, isOpen, onToggle }: ApiS
               value={config.systemPrompt}
               onChange={(e) => update({ systemPrompt: e.target.value })}
               rows={3}
-              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-sm text-slate-200 placeholder-slate-500 resize-y focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-sm text-slate-100 placeholder-slate-500 resize-y focus:outline-none focus:ring-2 focus:ring-blue-500/50"
             />
           </div>
         </div>
 
         {/* Action buttons */}
         <div className="flex items-center gap-3">
-          <button
-            type="button"
+          <Button
+            variant="primary"
+            size="sm"
             onClick={handleSave}
-            className="px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 hover:bg-blue-500 text-white transition-colors"
           >
             💾 保存到本地
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={handleTest}
             disabled={testStatus === 'testing'}
-            className="px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 transition-colors disabled:opacity-50"
           >
             {testStatus === 'testing' ? '⏳ 测试中...' : '🔌 测试连接'}
-          </button>
+          </Button>
           {testStatus !== 'idle' && (
             <span
               className={`text-xs ${

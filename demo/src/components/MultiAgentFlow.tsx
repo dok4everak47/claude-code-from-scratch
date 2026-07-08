@@ -141,7 +141,7 @@ export default function MultiAgentFlow({
 
           {/* Text content */}
           <div className="flex flex-col items-center gap-2 text-center">
-            <h3 className="text-base font-semibold text-slate-200">选择一个多 Agent 场景</h3>
+            <h3 className="text-base font-semibold text-slate-100">选择一个多 Agent 场景</h3>
             <p className="text-xs text-slate-400 leading-relaxed max-w-sm">
               观察编排者（Coordinator）如何将复杂任务委派给专业 Agent，
               并跟踪每一步的执行状态与消息流转
@@ -203,7 +203,7 @@ export default function MultiAgentFlow({
             type="button"
             onClick={onReset}
             disabled={!hasScenario || isBeforeStart}
-            className="px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors border border-slate-700"
+            className="px-3 py-1.5 text-xs font-medium rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors border border-slate-700"
             title="重置"
           >
             ⏮ 重置
@@ -213,7 +213,7 @@ export default function MultiAgentFlow({
             type="button"
             onClick={onPrev}
             disabled={!canGoPrev}
-            className="px-4 py-2 text-sm font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors border border-slate-700"
+            className="px-4 py-2 text-sm font-medium rounded-full bg-slate-800 hover:bg-slate-700 text-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors border border-slate-700"
             title="上一步"
           >
             ⏪ 上一步
@@ -223,7 +223,7 @@ export default function MultiAgentFlow({
             <button
               type="button"
               onClick={onPause}
-              className="px-6 py-2 text-sm font-semibold rounded-lg bg-yellow-600 hover:bg-yellow-500 text-white transition-colors shadow-lg shadow-yellow-500/20"
+              className="px-6 py-2 text-sm font-semibold rounded-full bg-yellow-500 hover:bg-yellow-500 text-white transition-colors shadow-lg shadow-yellow-500/20"
               title="暂停"
             >
               ⏸ 暂停
@@ -233,7 +233,7 @@ export default function MultiAgentFlow({
               type="button"
               onClick={onPlay}
               disabled={!hasScenario || isComplete}
-              className="px-6 py-2 text-sm font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white disabled:bg-slate-700 disabled:text-slate-500 disabled:cursor-not-allowed transition-colors shadow-lg shadow-emerald-500/20"
+              className="px-6 py-2 text-sm font-semibold rounded-full bg-emerald-500 hover:bg-emerald-500 text-white disabled:bg-slate-700 disabled:text-slate-500 disabled:cursor-not-allowed transition-colors shadow-lg shadow-emerald-500/20"
               title="自动播放"
             >
               ▶ 自动播放
@@ -244,7 +244,7 @@ export default function MultiAgentFlow({
             type="button"
             onClick={onNext}
             disabled={!canGoNext}
-            className="px-4 py-2 text-sm font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors border border-slate-700"
+            className="px-4 py-2 text-sm font-medium rounded-full bg-slate-800 hover:bg-slate-700 text-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors border border-slate-700"
             title="下一步"
           >
             下一步 ⏩
@@ -268,15 +268,15 @@ export default function MultiAgentFlow({
           </div>
 
           {/* 2D / 3D toggle */}
-          <div className="flex items-center gap-1 ml-4 bg-slate-800 rounded-lg p-0.5 border border-slate-700/50">
+          <div className="flex items-center gap-1 ml-4 bg-slate-800 rounded-full p-0.5 border border-slate-700/50">
             <button
               type="button"
               onClick={() => setViewMode('2d')}
               className={`
-                px-2.5 py-1 text-xs font-medium rounded-md transition-all
+                px-2.5 py-1 text-xs font-medium rounded-full transition-all
                 ${viewMode === '2d'
                   ? 'bg-slate-700 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
+                  : 'text-slate-400 hover:text-slate-100'
                 }
               `}
               title="2D 树形视图"
@@ -287,10 +287,10 @@ export default function MultiAgentFlow({
               type="button"
               onClick={() => setViewMode('3d')}
               className={`
-                px-2.5 py-1 text-xs font-medium rounded-md transition-all
+                px-2.5 py-1 text-xs font-medium rounded-full transition-all
                 ${viewMode === '3d'
                   ? 'bg-slate-700 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
+                  : 'text-slate-400 hover:text-slate-100'
                 }
               `}
               title="3D 场景视图"
@@ -791,7 +791,7 @@ function ExpandedNodeDetail({
           <button
             type="button"
             onClick={onClose}
-            className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition-colors"
+            className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-100 transition-colors"
           >
             <span className="text-lg">✕</span>
           </button>
@@ -819,10 +819,10 @@ function ExpandedNodeDetail({
                     className={`
                       rounded-lg border px-3 py-2
                       ${step.type === 'thought'
-                        ? 'bg-violet-900/10 border-violet-700/30'
+                        ? 'bg-violet-900/10 border-violet-500/30'
                         : step.type === 'tool_call'
-                          ? 'bg-blue-900/10 border-blue-700/30'
-                          : 'bg-emerald-900/10 border-emerald-700/30'
+                          ? 'bg-blue-900/10 border-blue-500/30'
+                          : 'bg-emerald-900/10 border-emerald-500/30'
                       }
                     `}
                   >

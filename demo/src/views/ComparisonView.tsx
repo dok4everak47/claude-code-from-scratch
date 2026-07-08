@@ -240,6 +240,17 @@ export function ComparisonView({
             ))}
           </main>
 
+          <FinalAnswerCompare
+            items={(viewingHistory ? viewingHistory.columns : comparisonState.columns).map((col) => ({
+              key: col.key,
+              label: col.label,
+              error: col.error,
+              text: 'steps' in col
+                ? (col.steps.find((s) => s.type === 'response')?.content ?? '')
+                : col.summary,
+            }))}
+          />
+
           <footer className="flex-shrink-0 border-t border-slate-700/50 bg-slate-900/90 backdrop-blur-sm">
             <div className="px-4 py-2.5">
               {viewingHistory ? (
@@ -345,9 +356,40 @@ export function ComparisonView({
 }
 
 // ============================================================
-// ComparisonCard — accepts either live state or history data
+// FinalAnswerCompare — side-by-side full final answers
 // ============================================================
 
+function FinalAnswerCompare({
+  items,
+}: {
+  items: { key: string; label: string; error: string | null; text: string }[]
+}) {
+  return (
+    <section className="flex-shrink-0 border-t border-slate-700/50 bg-slate-900/40">
+      <div className="px-4 py-1.5 text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+        💬 最终回答对比
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-px bg-slate-700/30 max-h-72 overflow-y-auto">
+        {items.map((it) => (
+          <div key={it.key} className="bg-slate-900/60 p-3">
+            <div className="text-[10px] text-slate-500 mb-1 truncate">{it.label}</div>
+            {it.error ? (
+              <div className="text-xs text-red-400 break-all">{it.error}</div>
+            ) : it.text ? (
+              <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap">{it.text}</p>
+            ) : (
+              <div className="text-xs text-slate-600">（无回答）</div>
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+// ============================================================
+// ComparisonCard — accepts either live state or history data
+// ============================================================
 function ComparisonCard({
   data,
   isLast,
@@ -585,6 +627,7 @@ function ComparisonMetrics({ columns }: { columns: ComparisonColumnState[] }) {
   const rows: Array<{ label: string; key: keyof import('@/engine/comparisonAgent').ColumnMetrics; format: (v: number | null) => string }> = [
     { label: '工具调用次数', key: 'toolCallCount', format: (v) => String(v ?? 0) },
     { label: '成功率', key: 'successRate', format: (v) => v != null ? `${Math.round(v * 100)}%` : '—' },
+    { label: '首次出工具', key: 'firstToolLatency', format: (v) => v != null ? `${v.toFixed(1)}s` : '—' },
     { label: '总运行时长', key: 'totalDuration', format: (v) => v != null ? `${v.toFixed(1)}s` : '—' },
     { label: '总步骤数', key: 'totalSteps', format: (v) => String(v ?? 0) },
   ]
@@ -611,35 +654,50 @@ function ComparisonMetrics({ columns }: { columns: ComparisonColumnState[] }) {
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
-              <tr key={row.key} className="border-b border-slate-700/20 last:border-0">
-                <td className="py-1 pr-3 text-slate-400">{row.label}</td>
-                {columns.map((col) => {
-                  const val = col.metrics?.[row.key]
-                  const display = row.format(val ?? null)
-                  let isBest = false
-                  if (row.key === 'successRate') {
-                    isBest = val != null && val >= maxRate
-                  } else if (row.key === 'firstToolLatency') {
-                    isBest = val != null && val <= minLatency
-                  } else if (row.key === 'totalDuration') {
-                    isBest = val != null && val <= minDuration
-                  } else {
-                    isBest = val != null && val >= (row.key === 'toolCallCount' ? maxCalls : maxSteps)
-                  }
-                  return (
-                    <td
-                      key={col.key}
-                      className={`py-1 px-2 text-center font-mono ${
-                        isBest ? 'text-emerald-400 font-semibold' : 'text-slate-300'
-                      }`}
-                    >
-                      {display}
-                    </td>
-                  )
-                })}
-              </tr>
-            ))}
+              {rows.map((row) => {
+                const validVals = columns
+                  .map((c) => c.metrics?.[row.key] ?? null)
+                  .filter((v): v is number => v != null)
+                const hasVariation =
+                  validVals.length > 1 && Math.max(...validVals) !== Math.min(...validVals)
+                return (
+                <tr key={row.key} className="border-b border-slate-700/20 last:border-0">
+                  <td className="py-1 pr-3 text-slate-400">{row.label}</td>
+                  {columns.map((col) => {
+                    const val = col.metrics?.[row.key]
+                    const display = row.format(val ?? null)
+                    let kind: 'good' | 'info' | null = null
+                    if (hasVariation && val != null) {
+                      if (row.key === 'successRate') {
+                        // only meaningful when someone failed (rate < 1)
+                        if (val >= maxRate && maxRate < 1) kind = 'good'
+                      } else if (row.key === 'firstToolLatency') {
+                        if (val <= minLatency) kind = 'good'
+                      } else if (row.key === 'totalDuration') {
+                        if (val <= minDuration) kind = 'good'
+                      } else {
+                        // toolCallCount / totalSteps → informational "most", not "better"
+                        if (val >= (row.key === 'toolCallCount' ? maxCalls : maxSteps)) kind = 'info'
+                      }
+                    }
+                    return (
+                      <td
+                        key={col.key}
+                        className={`py-1 px-2 text-center font-mono ${
+                          kind === 'good'
+                            ? 'text-emerald-400 font-semibold'
+                            : kind === 'info'
+                              ? 'text-blue-400 font-semibold'
+                              : 'text-slate-300'
+                        }`}
+                      >
+                        {display}
+                      </td>
+                    )
+                  })}
+                </tr>
+                )
+              })}
           </tbody>
         </table>
       </div>

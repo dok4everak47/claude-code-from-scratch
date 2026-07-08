@@ -34,8 +34,10 @@ export interface AgentStep {
   content: string
   /** Associated tool call data, only present when type === 'tool_call' */
   toolCall?: ToolCall
-  /** Simulated timestamp */
+  /** Simulated display timestamp (e.g. "14:03:21") */
   timestamp: string
+  /** Real wall-clock epoch milliseconds — used to align comparison lanes by actual time */
+  ms?: number
 }
 
 /** A user message in the conversation */

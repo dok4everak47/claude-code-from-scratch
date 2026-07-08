@@ -90,7 +90,7 @@ export default function App() {
   const [comparisonKeys, setComparisonKeys] = useState<ComparisonKey[]>(['default', 'aggressive', 'conservative'])
   const comparisonAgentRef = useRef<ComparisonAgent | null>(null)
   const [comparisonDraft, setComparisonDraft] = useState('')
-  const [comparisonSubMode, setComparisonSubMode] = useState<'summary' | 'detail'>('summary')
+  const [comparisonSubMode, setComparisonSubMode] = useState<'summary' | 'timeline'>('summary')
   /** Per-column model overrides for the comparison mode ('' = follow global). */
   const [comparisonColumnModels, setComparisonColumnModels] = useState<Record<string, string>>({})
 
@@ -320,7 +320,7 @@ export default function App() {
     const text = comparisonDraft.trim()
     if (!text || comparisonState.isRunning) return
     setComparisonDraft('')
-    setComparisonSubMode('detail')
+    setComparisonSubMode('timeline')
     comparisonAgentRef.current?.setColumnModels(comparisonColumnModels)
     comparisonAgentRef.current?.setActiveKeys(comparisonKeys)
     comparisonAgentRef.current?.run(text)
@@ -348,7 +348,7 @@ export default function App() {
 
   // Auto-switch to summary when all columns finish
   useEffect(() => {
-    if (comparisonSubMode === 'detail' &&
+    if (comparisonSubMode === 'timeline' &&
         !comparisonState.isRunning &&
         comparisonState.columns.some((c) => c.steps.length > 0)) {
       // Small delay so the last streaming state renders before switching
@@ -415,7 +415,7 @@ export default function App() {
     for (const c of entry.columns) models[c.key] = c.model
     setComparisonColumnModels(models)
     // Directly run - don't wait for state to flush
-    setComparisonSubMode('detail')
+    setComparisonSubMode('timeline')
     comparisonAgentRef.current?.setColumnModels(models)
     comparisonAgentRef.current?.setActiveKeys(entry.columns.map((c) => c.key as ComparisonKey))
     comparisonAgentRef.current?.run(entry.userMessage)

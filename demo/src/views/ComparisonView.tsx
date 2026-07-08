@@ -1,15 +1,16 @@
 // ============================================================
 // ComparisonView — comparison mode
-//   [input bar] [history panel] [summary/detail tabs]
-//   [summary cards | detail columns] [footer]
+//   [input bar] [history panel] [summary | timeline tabs]
+//   [summary: metric bars + final answers + footer]
+//   [timeline: synchronized multi-lane timeline w/ divergence]
 // ============================================================
 
 import { useState } from 'react'
 import type { ComparisonColumnState, ComparisonVerdict } from '@/engine/comparisonAgent'
 import { COMPARISON_KEYS, COMPARISON_PROMPTS, type ComparisonKey } from '@/engine/comparisonAgent'
 import { estimateUsageCostUSD, formatCostCNY, KNOWN_MODELS } from '@/engine/cost'
+import type { AgentStep } from '@/engine/types'
 import { Button } from '@/components/Button'
-import AgentFlow from '@/components/AgentFlow'
 
 // ---- Shared history types (kept here; App.tsx imports ComparisonHistoryEntry) ----
 export interface HistoryColumnData {
@@ -26,7 +27,7 @@ export interface HistoryColumnData {
   turnCount: number
   summary: string
   /** Full agent step timeline (persisted so history can replay the flow) */
-  steps: import('@/engine/types').AgentStep[]
+  steps: AgentStep[]
   error: string | null
 }
 
@@ -37,12 +38,14 @@ export interface ComparisonHistoryEntry {
   columns: HistoryColumnData[]
 }
 
+type AnyColumn = ComparisonColumnState | HistoryColumnData
+
 interface ComparisonViewProps {
   comparisonState: import('@/engine/comparisonAgent').ComparisonState
   comparisonDraft: string
   onDraftChange: (v: string) => void
-  comparisonSubMode: 'summary' | 'detail'
-  onSubModeChange: (m: 'summary' | 'detail') => void
+  comparisonSubMode: 'summary' | 'timeline'
+  onSubModeChange: (m: 'summary' | 'timeline') => void
   comparisonHistory: ComparisonHistoryEntry[]
   viewingHistory: ComparisonHistoryEntry | null
   historyOpen: boolean
@@ -63,6 +66,36 @@ interface ComparisonViewProps {
   onColumnModelChange: (key: ComparisonKey, model: string) => void
 }
 
+// ---- Strategy visual styling ----
+const STRATEGY_STYLE: Record<string, { dot: string; name: string; ring: string; lane: string; chip: string }> = {
+  default: { dot: '🟢', name: '默认', ring: 'ring-emerald-500/40', lane: 'bg-emerald-500', chip: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' },
+  aggressive: { dot: '🔴', name: '激进', ring: 'ring-red-500/40', lane: 'bg-red-500', chip: 'bg-red-500/15 text-red-300 border-red-500/30' },
+  conservative: { dot: '🔵', name: '保守', ring: 'ring-blue-500/40', lane: 'bg-blue-500', chip: 'bg-blue-500/15 text-blue-300 border-blue-500/30' },
+}
+function styleFor(key: string) {
+  return STRATEGY_STYLE[key] ?? STRATEGY_STYLE.default
+}
+
+const TOOL_ICON_MAP: Record<string, string> = {
+  get_weather: '🌤️',
+  search_hotel: '🏨',
+  search_flight: '✈️',
+  search_web: '🔍',
+  calculate: '🔢',
+  get_time: '🕐',
+  wikipedia_search: '📚',
+  get_exchange_rate: '💱',
+  get_definition: '🔤',
+  get_joke: '😄',
+}
+function getToolIcon(name: string) {
+  return TOOL_ICON_MAP[name] ?? '🔧'
+}
+
+function isLiveCol(c: AnyColumn): c is ComparisonColumnState {
+  return c.kind === 'live'
+}
+
 export function ComparisonView({
   comparisonState,
   comparisonDraft,
@@ -76,7 +109,6 @@ export function ComparisonView({
   onRun,
   onStop,
   onRetry,
-  onStopSingle,
   onHistorySelect,
   onHistoryDelete,
   onHistoryRerun,
@@ -85,6 +117,11 @@ export function ComparisonView({
   globalModel,
   onColumnModelChange,
 }: ComparisonViewProps) {
+  const liveColumns = comparisonState.columns
+  const displayColumns: AnyColumn[] = viewingHistory ? viewingHistory.columns : liveColumns
+  const verdict = viewingHistory ? null : comparisonState.verdict
+  const isRunning = comparisonState.isRunning
+
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* Top: input bar */}
@@ -97,7 +134,7 @@ export function ComparisonView({
             {COMPARISON_KEYS.map((key) => {
               const active = comparisonKeys.includes(key)
               const toggle = () => {
-                if (comparisonState.isRunning) return
+                if (isRunning) return
                 if (active) {
                   if (comparisonKeys.length <= 2) return // keep at least 2
                   onKeysChange(comparisonKeys.filter((k) => k !== key))
@@ -110,11 +147,11 @@ export function ComparisonView({
                   key={key}
                   type="button"
                   onClick={toggle}
-                  disabled={comparisonState.isRunning}
+                  disabled={isRunning}
                   title={COMPARISON_PROMPTS[key].label}
                   className={[
                     'px-2.5 py-1 text-xs rounded-full border transition-all duration-150',
-                    comparisonState.isRunning ? 'opacity-50 cursor-not-allowed' : '',
+                    isRunning ? 'opacity-50 cursor-not-allowed' : '',
                     active
                       ? 'bg-blue-500/20 border-blue-500/50 text-blue-200'
                       : 'bg-slate-800 border-slate-700/50 text-slate-500 hover:text-slate-300',
@@ -135,11 +172,11 @@ export function ComparisonView({
                 onRun()
               }
             }}
-            placeholder="输入一个问题，对比 3 种策略的 Tool Call 差异..."
-            disabled={comparisonState.isRunning}
+            placeholder="输入一个问题，对比多种策略的 Tool Call 差异..."
+            disabled={isRunning}
             className="flex-1 min-w-[200px] bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 disabled:opacity-50"
           />
-          {comparisonState.isRunning ? (
+          {isRunning ? (
             <Button variant="danger" size="md" onClick={onStop}>
               ⏹ 全部停止
             </Button>
@@ -157,7 +194,7 @@ export function ComparisonView({
             variant="secondary"
             size="md"
             onClick={onRetry}
-            disabled={comparisonState.isRunning}
+            disabled={isRunning}
           >
             🔄 重置
           </Button>
@@ -239,7 +276,7 @@ export function ComparisonView({
         </div>
       )}
 
-      {/* Sub-mode tabs: summary / detail */}
+      {/* Sub-mode tabs: summary / timeline */}
       <div className="flex-shrink-0 border-b border-slate-700/50 px-4 py-1.5 bg-slate-800/40">
         <div className="flex items-center gap-2 flex-wrap">
           <button
@@ -257,50 +294,44 @@ export function ComparisonView({
           </button>
           <button
             type="button"
-            onClick={() => onSubModeChange('detail')}
+            onClick={() => onSubModeChange('timeline')}
             className={`
               px-3 py-1 text-xs font-medium rounded-full transition-all duration-150
-              ${comparisonSubMode === 'detail'
+              ${comparisonSubMode === 'timeline'
                 ? 'bg-blue-500 text-white shadow-lg shadow-blue-500/20'
                 : 'bg-slate-800 text-slate-400 border border-slate-700/50 hover:text-slate-100 hover:bg-slate-700'
               }
             `}
           >
-            🔍 详细
+            🕐 时间轴
           </button>
 
-          {comparisonState.isRunning && (
+          {isRunning && (
             <span className="text-[10px] text-yellow-400 flex items-center gap-1 ml-2">
               <span className="spin inline-block w-2.5 h-2.5 border-2 border-yellow-400/30 border-t-yellow-400 rounded-full" />
-              运行中 — 完成后自动切换到总结
+              运行中 — 实时同步时间轴
             </span>
           )}
         </div>
       </div>
 
-      {/* Middle: summary cards or detail columns */}
+      {/* Middle: summary bars + answers OR synchronized timeline */}
       {comparisonSubMode === 'summary' ? (
-        <>
-          <main className="flex-1 flex flex-col lg:flex-row min-h-0">
-            {(viewingHistory ? viewingHistory.columns : comparisonState.columns).map((col, i) => (
-              <ComparisonCard
-                key={col.key}
-                data={col}
-                isLast={i === (viewingHistory ? viewingHistory.columns.length - 1 : comparisonState.columns.length - 1)}
-                onStop={() => !viewingHistory && onStopSingle(i)}
-                editable={!viewingHistory && !comparisonState.isRunning}
-                globalModel={globalModel}
-                onModelChange={onColumnModelChange}
-              />
-            ))}
-          </main>
+        <main className="flex-1 flex flex-col min-h-0 overflow-y-auto">
+          <ComparisonMetricBars
+            columns={displayColumns}
+            verdict={verdict}
+            globalModel={globalModel}
+            onColumnModelChange={onColumnModelChange}
+            editable={!viewingHistory && !isRunning}
+          />
 
           <FinalAnswerCompare
-            items={(viewingHistory ? viewingHistory.columns : comparisonState.columns).map((col) => ({
+            items={displayColumns.map((col) => ({
               key: col.key,
               label: col.label,
               error: col.error,
-              text: col.kind === 'live'
+              text: isLiveCol(col)
                 ? (col.steps.find((s) => s.type === 'response')?.content ?? '')
                 : col.summary,
             }))}
@@ -310,138 +341,28 @@ export function ComparisonView({
             <div className="px-4 py-2.5">
               {viewingHistory ? (
                 <ComparisonSummaryFromHistory columns={viewingHistory.columns} userMessage={viewingHistory.userMessage} />
-              ) : comparisonState.columns.some((c) => c.isLoading) ? (
+              ) : liveColumns.some((c) => c.isLoading) ? (
                 <div className="flex items-center gap-2 text-xs text-slate-500">
                   <span className="spin inline-block w-3 h-3 border-2 border-slate-400/30 border-t-slate-400 rounded-full" />
                   等待所有策略运行完成...
                 </div>
-              ) : comparisonState.columns.every((c) => c.steps.length === 0) && !comparisonState.isRunning ? (
+              ) : liveColumns.every((c) => c.steps.length === 0) && !isRunning ? (
                 <div className="text-xs text-slate-600 text-center">
                   输入问题并点击「运行」开始对比
                 </div>
               ) : (
-                  <>
-                    <ComparisonMetrics columns={comparisonState.columns} />
-                    <div className="mt-2">
-                      <ComparisonCostTotal columns={comparisonState.columns} />
-                    </div>
-                    <div className="border-t border-slate-700/30 my-2" />
-                    {comparisonState.verdict && (
-                      <ComparisonVerdictBlock verdict={comparisonState.verdict} />
-                    )}
-                    <ComparisonSummary columns={comparisonState.columns} />
-                  </>
+                <>
+                  <ComparisonCostTotal columns={liveColumns} />
+                  <div className="border-t border-slate-700/30 my-2" />
+                  {verdict && <ComparisonVerdictBlock verdict={verdict} />}
+                  <ComparisonSummary columns={liveColumns} />
+                </>
               )}
             </div>
           </footer>
-        </>
+        </main>
       ) : (
-        <>
-          <main className="flex-1 flex flex-col lg:flex-row min-h-0">
-            {(viewingHistory ? viewingHistory.columns : comparisonState.columns).map((rawCol, i) => {
-              // Normalize live + history columns to a common shape
-              const isHist = rawCol.kind === 'history'
-              const col = isHist
-                ? {
-                    key: rawCol.key,
-                    label: rawCol.label,
-                    model: rawCol.model,
-                    steps: rawCol.steps,
-                    error: rawCol.error,
-                    isLoading: false as const,
-                    currentTurn: rawCol.turnCount,
-                  }
-                : rawCol
-              return (
-              <section
-                key={col.key}
-                className="flex-1 min-w-0 flex flex-col border-b lg:border-b-0 lg:border-r border-slate-700/50"
-              >
-                <div className="px-3 py-1.5 border-b border-slate-700/30 bg-slate-800/50 flex items-center justify-between flex-shrink-0">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <span className="text-xs font-semibold text-slate-300 truncate">
-                      {col.key === 'default' ? '🟢' : col.key === 'aggressive' ? '🔴' : '🔵'} {col.label}
-                    </span>
-                    {col.isLoading && (
-                      <span className="spin inline-block w-2.5 h-2.5 border-2 border-yellow-400/30 border-t-yellow-400 rounded-full" />
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1 flex-shrink-0">
-                    {!isHist && (
-                      <ModelSelect
-                        value={col.model || globalModel}
-                        globalModel={globalModel}
-                        disabled={comparisonState.isRunning}
-                        onChange={(m) => onColumnModelChange(col.key as ComparisonKey, m)}
-                      />
-                    )}
-                    {isHist && col.model && (
-                      <span className="text-[10px] text-slate-500 font-mono truncate max-w-[120px]" title={col.model}>{col.model}</span>
-                    )}
-                    <span className="text-[10px] text-slate-500 font-mono">
-                      🔧{col.steps.filter((s) => s.type === 'tool_call').length} · 轮{col.currentTurn}
-                    </span>
-                    {col.isLoading && !isHist && (
-                      <button
-                        type="button"
-                        onClick={() => onStopSingle(i)}
-                        className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/15 hover:bg-red-900/50 text-red-400 border border-red-500/30 transition-colors"
-                        title="停止此列"
-                      >
-                        ⏹
-                      </button>
-                    )}
-                  </div>
-                </div>
-                <div className="flex-1 overflow-y-auto p-2 min-h-0">
-                  {col.isLoading && col.steps.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-full text-slate-500 gap-2">
-                      <span className="spin inline-block w-4 h-4 border-2 border-slate-400/30 border-t-slate-400 rounded-full" />
-                      <p className="text-[11px] text-center px-2">正在连接模型，等待首批结果…</p>
-                    </div>
-                  ) : col.steps.length === 0 && !col.isLoading ? (
-                    <div className="flex flex-col items-center justify-center h-full text-slate-600 gap-2">
-                      <span className="text-2xl">
-                        {col.key === 'default' ? '🧠' : col.key === 'aggressive' ? '⚡' : '🛡️'}
-                      </span>
-                      <p className="text-[11px] text-center px-2">等待运行...</p>
-                    </div>
-                  ) : col.error ? (
-                    <div className="flex flex-col items-center justify-center h-full text-red-400 gap-2 p-3">
-                      <span className="text-2xl">⚠️</span>
-                      <p className="text-xs text-center break-all">{col.error}</p>
-                    </div>
-                  ) : (
-                    <AgentFlow
-                      steps={col.steps}
-                      currentStepIndex={col.steps.length - 1}
-                      isLive
-                    />
-                  )}
-                </div>
-              </section>
-              )
-            })}
-          </main>
-
-          <footer className="flex-shrink-0 border-t border-slate-700/50 bg-slate-900/90 backdrop-blur-sm">
-            <div className="flex items-center justify-center gap-4 px-4 py-2">
-              {comparisonState.columns.some((c) => c.isLoading) ? (
-                <span className="text-xs text-slate-500">⏳ 运行中...</span>
-              ) : comparisonState.columns.some((c) => c.steps.length > 0) ? (
-                <button
-                  type="button"
-                  onClick={() => onSubModeChange('summary')}
-                  className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
-                >
-                  📊 查看总结对比
-                </button>
-              ) : (
-                <span className="text-xs text-slate-600">输入问题并点击「运行」开始对比</span>
-              )}
-            </div>
-          </footer>
-        </>
+        <ComparisonTimeline columns={displayColumns} />
       )}
     </div>
   )
@@ -555,217 +476,444 @@ function FinalAnswerCompare({
 }
 
 // ============================================================
-// ComparisonCard — accepts either live state or history data
+// ComparisonMetricBars — ① horizontal metric bar cards (metrics to top)
+//   ④ winner gets gold border + 🏆 badge
 // ============================================================
-function ComparisonCard({
-  data,
-  isLast,
-  onStop,
+
+function ComparisonMetricBars({
+  columns,
+  verdict,
+  globalModel,
+  onColumnModelChange,
   editable,
+}: {
+  columns: AnyColumn[]
+  verdict: ComparisonVerdict | null
+  globalModel: string
+  onColumnModelChange?: (key: ComparisonKey, model: string) => void
+  editable?: boolean
+}) {
+  const winnerKey = verdict?.winner ?? null
+  return (
+    <div className="flex-shrink-0 px-4 py-2 space-y-1.5 bg-slate-800/40 border-b border-slate-700/50">
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">📊 策略指标对比</span>
+        {winnerKey && (
+          <span className="text-[10px] text-yellow-400 font-medium">
+            🏆 综合最佳：{verdict?.columns.find((c) => c.key === winnerKey)?.label ?? winnerKey}
+          </span>
+        )}
+      </div>
+      {columns.map((col) => (
+        <MetricBar
+          key={col.key}
+          data={col}
+          isWinner={col.key === winnerKey}
+          verdictCol={verdict?.columns.find((c) => c.key === col.key) ?? null}
+          globalModel={globalModel}
+          onModelChange={onColumnModelChange}
+          editable={editable}
+        />
+      ))}
+    </div>
+  )
+}
+
+function MetricBar({
+  data,
+  isWinner,
+  verdictCol,
   globalModel,
   onModelChange,
+  editable,
 }: {
-  data: ComparisonColumnState | HistoryColumnData
-  isLast: boolean
-  onStop?: () => void
-  editable?: boolean
-  globalModel?: string
+  data: AnyColumn
+  isWinner: boolean
+  verdictCol: ComparisonVerdict['columns'][number] | null
+  globalModel: string
   onModelChange?: (key: ComparisonKey, model: string) => void
+  editable?: boolean
 }) {
   const [expanded, setExpanded] = useState(false)
+  const style = styleFor(data.key)
+  const live = isLiveCol(data) ? data : null
+  const hist = live ? null : (data as HistoryColumnData)
 
-  const TOOL_ICON_MAP: Record<string, string> = {
-    get_weather: '🌤️',
-    search_hotel: '🏨',
-    search_flight: '✈️',
-    search_web: '🔍',
-    calculate: '🔢',
-    get_time: '🕐',
-  }
-  const getToolIcon = (name: string) => TOOL_ICON_MAP[name] ?? '🔧'
+  const toolCount = live
+    ? live.steps.filter((s) => s.type === 'tool_call').length
+    : hist!.toolCallCount
 
-  const isLive = data.kind === 'live'
-  const live = data as ComparisonColumnState
+  const seq = live
+    ? live.steps.filter((s): s is typeof s & { toolCall: NonNullable<typeof s.toolCall> } => s.type === 'tool_call' && !!s.toolCall).map((s) => s.toolCall.name)
+    : hist!.toolCallSequence
 
-  const label = data.label
-  const key = data.key
-  const error = data.error
-
-  const toolCallData: { count: number; sequence: string[] } = isLive
-    ? {
-        count: live.steps.filter((s) => s.type === 'tool_call').length,
-        sequence: live.steps
-          .filter((s): s is typeof s & { toolCall: NonNullable<typeof s.toolCall> } => s.type === 'tool_call' && !!s.toolCall)
-          .map((s) => s.toolCall.name),
-      }
-    : { count: data.toolCallCount, sequence: data.toolCallSequence }
-
-  const duration = isLive
+  const duration = live
     ? live.endTime && live.startTime
       ? ((live.endTime - live.startTime) / 1000).toFixed(1) + 's'
       : live.isLoading ? '运行中...' : '—'
-    : data.durationMs > 0 ? (data.durationMs / 1000).toFixed(1) + 's' : '—'
+    : hist!.durationMs > 0 ? (hist!.durationMs / 1000).toFixed(1) + 's' : '—'
 
-  const turnCount = isLive ? live.currentTurn : data.turnCount
+  const usage = data.usage
+  const cost = usage
+    ? estimateUsageCostUSD(data.model || globalModel || 'deepseek-chat', usage.promptTokens, usage.completionTokens)
+    : 0
 
-  const responseSummary = isLive
-    ? (live.steps.find((s) => s.type === 'response')?.content ?? '').slice(0, 100)
-    : data.summary.slice(0, 100)
-
-  const steps = isLive ? live.steps : []
-  const hasDetail = steps.length > 0
-
-  const colorMap: Record<string, { dot: string; bg: string; border: string }> = {
-    default: { dot: '🟢', bg: 'from-emerald-500/10 to-transparent', border: 'border-emerald-500/30' },
-    aggressive: { dot: '🔴', bg: 'from-red-500/10 to-transparent', border: 'border-red-500/30' },
-    conservative: { dot: '🔵', bg: 'from-blue-500/10 to-transparent', border: 'border-blue-500/30' },
-  }
-  const colors = colorMap[key] ?? colorMap.default
-
-  const isActuallyLoading = isLive ? (data as { isLoading?: boolean }).isLoading : false
-  const statusIcon = isActuallyLoading
-    ? <span className="spin inline-block w-3 h-3 border-2 border-yellow-400/30 border-t-yellow-400 rounded-full" />
-    : error
-      ? <span className="text-red-400">❌</span>
-      : toolCallData.count > 0
-        ? <span className="text-emerald-400">✅</span>
-        : <span className="text-slate-500">✅</span>
+  const successRate = live?.metrics?.successRate
+  const firstTool = live?.metrics?.firstToolLatency
+  const totalSteps = live?.metrics?.totalSteps ?? (live ? live.steps.length : hist!.turnCount)
 
   return (
-    <section
-      className={`flex-1 min-w-0 flex flex-col border-b lg:border-b-0 lg:border-r border-slate-700/50 ${isLast ? 'lg:border-r-0' : ''}`}
+    <div
+      className={[
+        'rounded-lg border px-3 py-2 transition-all',
+        isWinner
+          ? 'border-yellow-400/70 bg-yellow-500/[0.06] shadow-[0_0_0_1px_rgba(250,204,21,0.25)]'
+          : 'border-slate-700/50 bg-slate-900/30',
+      ].join(' ')}
     >
-      <div
-        className="flex-1 overflow-y-auto min-h-0"
-        onClick={() => hasDetail && setExpanded(!expanded)}
-      >
-        <div
-          className={`h-full p-3 bg-gradient-to-b ${colors.bg} border-b ${colors.border} flex flex-col gap-2.5`}
+      <div className="flex items-center gap-2 flex-wrap">
+        {isWinner && <span className="text-sm">🏆</span>}
+        <span className="text-sm">{style.dot}</span>
+        <span className="text-sm font-semibold text-slate-100">{data.label}</span>
+        {editable && onModelChange ? (
+          <ModelSelect
+            value={data.model || globalModel}
+            globalModel={globalModel}
+            disabled={false}
+            onChange={(m) => onModelChange(data.key as ComparisonKey, m)}
+          />
+        ) : data.model ? (
+          <span className="text-[10px] text-slate-500 font-mono truncate max-w-[140px]" title={data.model}>{data.model}</span>
+        ) : null}
+        <span className="ml-auto flex items-center gap-3 text-xs font-mono text-slate-300">
+          <span title="工具调用次数">🔧 {toolCount}</span>
+          <span title="总运行时长">⏱ {duration}</span>
+          {usage && usage.promptTokens + usage.completionTokens > 0 && (
+            <span title="Token 用量" className="text-slate-400">
+              {usage.promptTokens + usage.completionTokens} tok
+            </span>
+          )}
+          {cost > 0 && (
+            <span title="预估成本" className="text-yellow-400">{formatCostCNY(cost)}</span>
+          )}
+        </span>
+        {verdictCol && (
+          <span className="flex items-center gap-1.5">
+            <ScoreDots label="相关" value={verdictCol.relevance} />
+            <ScoreDots label="准确" value={verdictCol.accuracy} />
+            <ScoreDots label="效率" value={verdictCol.efficiency} />
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={() => setExpanded(!expanded)}
+          className="text-[10px] px-1.5 py-0.5 rounded bg-slate-700/50 hover:bg-slate-700 text-slate-300 transition-colors"
         >
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5 min-w-0">
-              <span className="text-sm">{colors.dot}</span>
-              <span className="text-sm font-semibold text-slate-100 truncate">{label}</span>
-              {editable && onModelChange && globalModel != null ? (
-                <ModelSelect
-                  value={data.model || globalModel}
-                  globalModel={globalModel}
-                  onChange={(m) => onModelChange(data.key as ComparisonKey, m)}
-                />
-              ) : data.model ? (
-                <span className="text-[10px] text-slate-500 font-mono truncate max-w-[130px]" title={data.model}>
-                  {data.model}
-                </span>
-              ) : null}
-            </div>
-            <div className="flex items-center gap-1 flex-shrink-0">
-              {statusIcon}
-              {isActuallyLoading && onStop && (
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); onStop() }}
-                  className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/15 hover:bg-red-900/50 text-red-400 border border-red-500/30 transition-colors"
-                  title="停止此列"
-                >
-                  ⏹
-                </button>
-              )}
-            </div>
-          </div>
+          {expanded ? '收起 ▴' : '展开 ▾'}
+        </button>
+      </div>
 
+      {expanded && (
+        <div className="mt-2 pt-2 border-t border-slate-700/30 space-y-1.5">
           <div>
-            <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">
-              Tool Call 调用序列
-            </div>
+            <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Tool Call 调用序列</div>
             <div className="flex items-center flex-wrap gap-1">
-              {toolCallData.sequence.length === 0 ? (
+              {seq.length === 0 ? (
                 <span className="text-xs text-slate-500">—</span>
               ) : (
-                toolCallData.sequence.map((name, i) => (
+                seq.map((name, i) => (
                   <span key={i} className="flex items-center gap-0.5">
                     {i > 0 && <span className="text-slate-600 text-xs mx-0.5">→</span>}
-                    <span
-                      className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs bg-slate-800/70 border border-slate-700/50"
-                      title={name}
-                    >
+                    <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs border ${style.chip}`} title={name}>
                       <span>{getToolIcon(name)}</span>
-                      <span className="text-slate-300">{name}</span>
+                      <span>{name}</span>
                     </span>
                   </span>
                 ))
               )}
             </div>
           </div>
-
-          <div className="grid grid-cols-3 gap-2">
-            <div className="bg-slate-900/40 rounded-lg p-2 text-center">
-              <div className="text-2xl font-bold font-mono text-slate-100">{toolCallData.count}</div>
-              <div className="text-[10px] text-slate-500">工具调用</div>
-            </div>
-            <div className="bg-slate-900/40 rounded-lg p-2 text-center">
-              <div className="text-lg font-semibold font-mono text-slate-100">{duration}</div>
-              <div className="text-[10px] text-slate-500">耗时</div>
-            </div>
-            <div className="bg-slate-900/40 rounded-lg p-2 text-center">
-              <div className="text-lg font-semibold font-mono text-slate-100">{turnCount}</div>
-              <div className="text-[10px] text-slate-500">轮次</div>
-            </div>
-          </div>
-
-          {data.usage && data.usage.promptTokens + data.usage.completionTokens > 0 && (
-            <div className="flex items-center gap-1 text-[10px] text-slate-500">
-              <span>🪙</span>
-              <span className="font-mono">{data.usage.promptTokens + data.usage.completionTokens} tok</span>
-              <span className="text-yellow-400 font-mono">
-                · {formatCostCNY(estimateUsageCostUSD(data.model || globalModel || 'deepseek-chat', data.usage.promptTokens, data.usage.completionTokens))}
-              </span>
-            </div>
-          )}
-
-          {responseSummary && !isActuallyLoading && (
-            <div>
-              <div className="flex items-center gap-1 mb-0.5">
-                <span className="text-[10px] text-slate-500 uppercase tracking-wider">最终回答</span>
-                {hasDetail && (
-                  <span className="text-[10px] text-slate-600">
-                    — 点击{expanded ? '收起' : '展开'}详情
-                  </span>
-                )}
+          <div className="grid grid-cols-3 gap-2 text-xs">
+            <div className="bg-slate-900/40 rounded-lg p-1.5 text-center">
+              <div className="text-sm font-semibold font-mono text-slate-100">
+                {successRate != null ? `${Math.round(successRate * 100)}%` : '—'}
               </div>
-              <p className="text-xs text-slate-300 leading-relaxed bg-slate-900/30 rounded-lg px-2.5 py-1.5">
-                {responseSummary}
-              </p>
+              <div className="text-[10px] text-slate-500">成功率</div>
             </div>
-          )}
-
-          {error && (
-            <div className="bg-red-500/15 border border-red-500/30 rounded-lg px-2.5 py-1.5">
-              <span className="text-xs text-red-400">{error}</span>
+            <div className="bg-slate-900/40 rounded-lg p-1.5 text-center">
+              <div className="text-sm font-semibold font-mono text-slate-100">
+                {firstTool != null ? `${firstTool.toFixed(1)}s` : '—'}
+              </div>
+              <div className="text-[10px] text-slate-500">首工具延迟</div>
             </div>
-          )}
+            <div className="bg-slate-900/40 rounded-lg p-1.5 text-center">
+              <div className="text-sm font-semibold font-mono text-slate-100">{totalSteps}</div>
+              <div className="text-[10px] text-slate-500">总步骤</div>
+            </div>
+          </div>
         </div>
+      )}
+    </div>
+  )
+}
 
-        {expanded && hasDetail && (
-          <div className="border-t border-slate-700/30">
-            <div className="px-3 py-1.5 bg-slate-800/50 border-b border-slate-700/30">
-              <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">🧠 详细 Agent 流程</span>
-            </div>
-            <div className="overflow-y-auto max-h-96 p-2">
-              <AgentFlow
-                steps={steps}
-                currentStepIndex={steps.length - 1}
-                isLive
-              />
-            </div>
+// ============================================================
+// ComparisonTimeline — ② synchronized multi-lane timeline
+//   ③ divergence highlighting (red ring on off-pattern tool calls)
+// ============================================================
+
+interface TimelineItem {
+  step: AgentStep
+  ms: number
+}
+
+interface TimelineColumn {
+  key: string
+  label: string
+  dot: string
+  items: TimelineItem[]
+  baseStart: number
+  baseEnd: number
+}
+
+/** Majority-vote per position: a tool call differing from the majority is "divergent". */
+function computeDivergentToolIds(
+  cols: { key: string; tools: { id: string; name: string }[] }[],
+): Set<string> {
+  const divergent = new Set<string>()
+  const maxLen = cols.reduce((m, c) => Math.max(m, c.tools.length), 0)
+  for (let p = 0; p < maxLen; p++) {
+    const namesAtP = cols.map((c) => c.tools[p]?.name).filter((n): n is string => !!n)
+    if (namesAtP.length === 0) continue
+    if (namesAtP.length === 1) {
+      // Only one strategy called a tool here → it's divergent relative to the others
+      const col = cols.find((c) => c.tools[p]?.name === namesAtP[0])
+      const id = col?.tools[p]?.id
+      if (id) divergent.add(id)
+      continue
+    }
+    const freq: Record<string, number> = {}
+    for (const n of namesAtP) freq[n] = (freq[n] ?? 0) + 1
+    const maxFreq = Math.max(...Object.values(freq))
+    const majority = Object.entries(freq).find(([, c]) => c === maxFreq)?.[0]
+    for (const c of cols) {
+      const t = c.tools[p]
+      if (t && t.name !== majority) divergent.add(t.id)
+    }
+  }
+  return divergent
+}
+
+function normalizeColumns(columns: AnyColumn[]): TimelineColumn[] {
+  return columns.map((col) => {
+    const live = isLiveCol(col) ? col : null
+    const steps = live ? live.steps : []
+    const baseStart = live ? live.startTime ?? 0 : 0
+    const baseEnd = live ? live.endTime ?? 0 : (col as HistoryColumnData).durationMs || 0
+    const items: TimelineItem[] = steps.map((s, i) => ({
+      step: s,
+      ms: typeof s.ms === 'number' ? s.ms : steps.length <= 1 ? baseStart : baseStart + (i / (steps.length - 1)) * (baseEnd - baseStart),
+    }))
+    return {
+      key: col.key,
+      label: col.label,
+      dot: styleFor(col.key).dot,
+      items,
+      baseStart,
+      baseEnd,
+    }
+  })
+}
+
+function ComparisonTimeline({ columns }: { columns: AnyColumn[] }) {
+  const [selected, setSelected] = useState<{ colKey: string; step: AgentStep } | null>(null)
+
+  const norm = normalizeColumns(columns)
+
+  // Global time range across all lanes
+  let gMin = Infinity
+  let gMax = -Infinity
+  for (const c of norm) {
+    for (const it of c.items) {
+      gMin = Math.min(gMin, it.ms)
+      gMax = Math.max(gMax, it.ms)
+    }
+    gMin = Math.min(gMin, c.baseStart)
+    gMax = Math.max(gMax, c.baseEnd)
+  }
+  if (!isFinite(gMin)) {
+    gMin = 0
+    gMax = 1
+  }
+  if (gMax <= gMin) gMax = gMin + 1
+  const span = gMax - gMin
+
+  // Divergence detection on tool calls
+  const toolLists = norm.map((c) => ({
+    key: c.key,
+    tools: c.items
+      .filter((it) => it.step.type === 'tool_call' && it.step.toolCall)
+      .map((it) => ({ id: it.step.id, name: it.step.toolCall!.name })),
+  }))
+  const divergent = computeDivergentToolIds(toolLists)
+
+  const TICKS = 5
+  const ticks = Array.from({ length: TICKS + 1 }, (_, i) => gMin + (span * i) / TICKS)
+
+  const pos = (ms: number) => Math.max(1.5, Math.min(98.5, ((ms - gMin) / span) * 100))
+
+  const hasSteps = norm.some((c) => c.items.length > 0)
+
+  return (
+    <div className="flex-1 overflow-auto p-4 min-h-0">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+          🕐 同步时间轴 · 按真实时间戳对齐
+        </span>
+        <span className="text-[10px] text-slate-600">总时长 {((gMax - gMin) / 1000).toFixed(1)}s</span>
+      </div>
+
+      {divergent.size > 0 && (
+        <div className="mb-2 text-[11px] text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded px-2 py-1">
+          ⚠ 检测到 {divergent.size} 处工具调用分歧（红框标注）— 策略在工具选择 / 顺序上出现分化
+        </div>
+      )}
+
+      {!hasSteps ? (
+        <div className="flex flex-col items-center justify-center h-full text-slate-600 gap-2">
+          <span className="text-2xl">🕐</span>
+          <p className="text-xs text-center px-2">运行后将在此显示各策略的同步时间轴</p>
+        </div>
+      ) : (
+        <div className="relative min-w-[640px]">
+          {/* time axis header */}
+          <div className="relative h-5 mb-1 ml-28 border-b border-slate-700/40">
+            {ticks.map((t, i) => (
+              <span
+                key={i}
+                className="absolute text-[9px] text-slate-600 font-mono -translate-x-1/2"
+                style={{ left: `${pos(t)}%` }}
+              >
+                {((t - gMin) / 1000).toFixed(1)}s
+              </span>
+            ))}
           </div>
-        )}
-        {expanded && !hasDetail && (
-          <div className="border-t border-slate-700/30 p-3 text-center text-xs text-slate-500">
-            该策略未产生可展示的流程
-          </div>
+
+          {norm.map((c) => (
+            <div key={c.key} className="flex items-stretch mb-2">
+              {/* lane label */}
+              <div className="w-28 flex-shrink-0 flex items-center gap-1 pr-2">
+                <span>{c.dot}</span>
+                <span className="text-xs text-slate-300 truncate">{c.label}</span>
+              </div>
+              {/* lane track */}
+              <div className="relative flex-1 h-11 bg-slate-800/30 rounded border border-slate-700/40">
+                {ticks.map((t, i) => (
+                  <div
+                    key={i}
+                    className="absolute top-0 bottom-0 border-l border-slate-700/20"
+                    style={{ left: `${pos(t)}%` }}
+                  />
+                ))}
+                {c.items.map((it) => {
+                  const isTool = it.step.type === 'tool_call'
+                  const isResponse = it.step.type === 'response'
+                  const isDiv = isTool && divergent.has(it.step.id)
+                  const bg = isResponse
+                    ? 'bg-emerald-500/85'
+                    : isTool
+                      ? isDiv ? 'bg-red-500/85' : 'bg-blue-500/85'
+                      : 'bg-slate-500/70'
+                  const icon = isTool
+                    ? getToolIcon(it.step.toolCall!.name)
+                    : isResponse ? '💬' : '🧠'
+                  return (
+                    <button
+                      key={it.step.id}
+                      type="button"
+                      onClick={() => setSelected({ colKey: c.key, step: it.step })}
+                      title={it.step.content.slice(0, 60)}
+                      className={[
+                        'absolute top-1/2 -translate-y-1/2 h-7 px-1.5 rounded text-[10px] text-white flex items-center gap-0.5 transition-all hover:brightness-125 hover:z-10',
+                        bg,
+                        isDiv ? 'ring-2 ring-red-300 z-[1]' : '',
+                      ].join(' ')}
+                      style={{ left: `${pos(it.ms)}%` }}
+                    >
+                      <span>{icon}</span>
+                      {isTool && (
+                        <span className="hidden lg:inline max-w-[80px] truncate">
+                          {it.step.toolCall!.name}
+                        </span>
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* selected step detail */}
+      {selected && <TimelineDetail step={selected.step} />}
+
+      {/* legend */}
+      <div className="mt-3 flex items-center gap-4 text-[10px] text-slate-500 flex-wrap">
+        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-slate-500/70 inline-block" />思考</span>
+        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-blue-500/85 inline-block" />工具调用</span>
+        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-emerald-500/85 inline-block" />最终回答</span>
+        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded ring-2 ring-red-300 bg-red-500/85 inline-block" />分歧调用</span>
+      </div>
+    </div>
+  )
+}
+
+function TimelineDetail({ step }: { step: AgentStep }) {
+  const isTool = step.type === 'tool_call' && step.toolCall
+  let input: unknown = null
+  let output: unknown = null
+  if (isTool) {
+    try { input = JSON.parse(step.toolCall!.input) } catch { input = step.toolCall!.input }
+    if (step.toolCall!.output) {
+      try { output = JSON.parse(step.toolCall!.output) } catch { output = step.toolCall!.output }
+    }
+  }
+  const typeLabel =
+    step.type === 'response' ? '最终回答' : step.type === 'tool_call' ? '工具调用' : '思考'
+  return (
+    <div className="mt-3 border border-slate-700/50 rounded-lg bg-slate-900/50 p-3">
+      <div className="flex items-center gap-2 mb-1.5">
+        <span className="text-[10px] uppercase tracking-wider text-slate-500">{typeLabel}</span>
+        {isTool && (
+          <span className="text-xs font-medium text-blue-300">
+            {getToolIcon(step.toolCall!.name)} {step.toolCall!.name}
+            <span className={`ml-1 text-[10px] ${step.toolCall!.status === 'success' ? 'text-emerald-400' : step.toolCall!.status === 'error' ? 'text-red-400' : 'text-slate-400'}`}>
+              {step.toolCall!.status}
+            </span>
+          </span>
         )}
       </div>
-    </section>
+      <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap break-words">
+        {step.content}
+      </p>
+      {isTool && (
+        <div className="mt-2 grid grid-cols-1 lg:grid-cols-2 gap-2">
+          <div>
+            <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-0.5">参数</div>
+            <pre className="text-[11px] text-slate-400 bg-slate-800/60 rounded p-2 overflow-x-auto whitespace-pre-wrap break-words">
+              {JSON.stringify(input, null, 2)}
+            </pre>
+          </div>
+          <div>
+            <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-0.5">结果</div>
+            <pre className="text-[11px] text-slate-400 bg-slate-800/60 rounded p-2 overflow-x-auto whitespace-pre-wrap break-words">
+              {output != null ? JSON.stringify(output, null, 2) : '—'}
+            </pre>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -820,99 +968,7 @@ function ComparisonSummaryFromHistory({ columns, userMessage }: {
 }
 
 // ============================================================
-// ComparisonMetrics — quantifiable metrics table
-// ============================================================
-
-function ComparisonMetrics({ columns }: { columns: ComparisonColumnState[] }) {
-  type Row = {
-    label: string
-    getValue: (c: ComparisonColumnState) => number | null
-    format: (v: number | null) => string
-    /** 'low' = smaller is better (highlight minimum), 'high' = larger is better, 'none' = no highlight */
-    better: 'low' | 'high' | 'none'
-  }
-
-  const rows: Row[] = [
-    { label: '工具调用次数', getValue: (c) => c.metrics?.toolCallCount ?? null, format: (v) => String(v ?? 0), better: 'none' },
-    { label: '成功率', getValue: (c) => c.metrics?.successRate ?? null, format: (v) => (v != null ? `${Math.round(v * 100)}%` : '—'), better: 'high' },
-    { label: '首次出工具', getValue: (c) => c.metrics?.firstToolLatency ?? null, format: (v) => (v != null ? `${v.toFixed(1)}s` : '—'), better: 'low' },
-    { label: '总运行时长', getValue: (c) => c.metrics?.totalDuration ?? null, format: (v) => (v != null ? `${v.toFixed(1)}s` : '—'), better: 'low' },
-    { label: '总步骤数', getValue: (c) => c.metrics?.totalSteps ?? null, format: (v) => String(v ?? 0), better: 'none' },
-    {
-      label: 'Token 用量',
-      getValue: (c) => (c.usage ? c.usage.promptTokens + c.usage.completionTokens : null),
-      format: (v) => (v != null ? String(v) : '—'),
-      better: 'low',
-    },
-    {
-      label: '预估成本',
-      getValue: (c) => (c.usage ? estimateUsageCostUSD(c.model || 'deepseek-chat', c.usage.promptTokens, c.usage.completionTokens) : null),
-      format: (v) => (v != null ? formatCostCNY(v) : '—'),
-      better: 'low',
-    },
-  ]
-
-  return (
-    <div className="text-xs">
-      <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">
-        📊 评测指标
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse">
-          <thead>
-            <tr className="border-b border-slate-700/30">
-              <th className="text-left py-1 pr-3 text-slate-500 font-medium w-32" />
-              {columns.map((col) => (
-                <th
-                  key={col.key}
-                  className="py-1 px-2 text-center font-medium"
-                >
-                  {col.key === 'default' ? '🟢' : col.key === 'aggressive' ? '🔴' : '🔵'}{' '}
-                  {col.label}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => {
-              const vals = columns
-                .map((c) => row.getValue(c))
-                .filter((v): v is number => v != null)
-              const hasVariation = vals.length > 1 && Math.max(...vals) !== Math.min(...vals)
-              const best = row.better === 'low' ? Math.min(...vals) : row.better === 'high' ? Math.max(...vals) : null
-              return (
-                <tr key={row.label} className="border-b border-slate-700/20 last:border-0">
-                  <td className="py-1 pr-3 text-slate-400">{row.label}</td>
-                  {columns.map((col) => {
-                    const val = row.getValue(col)
-                    const display = row.format(val ?? null)
-                    const kind =
-                      hasVariation && best != null && val != null && val === best
-                        ? 'good'
-                        : null
-                    return (
-                      <td
-                        key={col.key}
-                        className={`py-1 px-2 text-center font-mono ${
-                          kind === 'good' ? 'text-emerald-400 font-semibold' : 'text-slate-300'
-                        }`}
-                      >
-                        {display}
-                      </td>
-                    )
-                  })}
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  )
-}
-
-// ============================================================
-// ComparisonVerdictBlock — LLM judge qualitative comparison
+// ScoreDots — 1-5 rating dots
 // ============================================================
 
 function ScoreDots({ label, value }: { label: string; value: number }) {
@@ -930,6 +986,10 @@ function ScoreDots({ label, value }: { label: string; value: number }) {
     </span>
   )
 }
+
+// ============================================================
+// ComparisonVerdictBlock — LLM judge qualitative comparison
+// ============================================================
 
 function ComparisonVerdictBlock({ verdict }: { verdict: ComparisonVerdict }) {
   const winnerLabel = verdict.winner
@@ -967,6 +1027,7 @@ function ComparisonVerdictBlock({ verdict }: { verdict: ComparisonVerdict }) {
 // ============================================================
 // ComparisonSummary — auto-generated text at the bottom
 // ============================================================
+
 function ComparisonSummary({ columns }: { columns: ComparisonColumnState[] }) {
   const lines: string[] = []
 

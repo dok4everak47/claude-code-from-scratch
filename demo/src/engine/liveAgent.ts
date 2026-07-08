@@ -27,6 +27,7 @@ function makeStep(
     content,
     toolCall,
     timestamp: timestamp(),
+    ms: Date.now(),
   }
 }
 

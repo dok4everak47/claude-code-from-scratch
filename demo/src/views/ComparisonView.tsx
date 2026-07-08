@@ -665,6 +665,9 @@ function MetricBar({
 interface TimelineItem {
   step: AgentStep
   ms: number
+  /** Tool invocation window — present only for tool_call steps with real timing */
+  toolStart?: number
+  toolEnd?: number
 }
 
 interface TimelineColumn {
@@ -713,6 +716,8 @@ function normalizeColumns(columns: AnyColumn[]): TimelineColumn[] {
     const items: TimelineItem[] = steps.map((s, i) => ({
       step: s,
       ms: typeof s.ms === 'number' ? s.ms : steps.length <= 1 ? baseStart : baseStart + (i / (steps.length - 1)) * (baseEnd - baseStart),
+      toolStart: s.type === 'tool_call' && s.toolCall?.startedAt ? s.toolCall.startedAt : undefined,
+      toolEnd: s.type === 'tool_call' && s.toolCall?.endedAt ? s.toolCall.endedAt : undefined,
     }))
     return {
       key: col.key,
@@ -819,6 +824,19 @@ function ComparisonTimeline({ columns }: { columns: AnyColumn[] }) {
                   const isTool = it.step.type === 'tool_call'
                   const isResponse = it.step.type === 'response'
                   const isDiv = isTool && divergent.has(it.step.id)
+                  // Tool-call execution window: render as a bar spanning start→end.
+                  const hasToolSpan = isTool && typeof it.toolStart === 'number'
+                  const barRunning = hasToolSpan && typeof it.toolEnd !== 'number'
+                  let leftPct: number
+                  let widthPct: number | undefined
+                  if (hasToolSpan) {
+                    const startPct = pos(it.toolStart!)
+                    const endPct = typeof it.toolEnd === 'number' ? pos(it.toolEnd) : Math.min(98.5, startPct + 1.5)
+                    leftPct = Math.min(startPct, 98.5 - 1.5)
+                    widthPct = Math.max(1.5, endPct - startPct)
+                  } else {
+                    leftPct = pos(it.ms)
+                  }
                   const bg = isResponse
                     ? 'bg-emerald-500/85'
                     : isTool
@@ -827,25 +845,34 @@ function ComparisonTimeline({ columns }: { columns: AnyColumn[] }) {
                   const icon = isTool
                     ? getToolIcon(it.step.toolCall!.name)
                     : isResponse ? '💬' : '🧠'
+                  const durLabel =
+                    hasToolSpan && typeof it.toolEnd === 'number'
+                      ? `${((it.toolEnd - it.toolStart!) / 1000).toFixed(1)}s`
+                      : ''
                   return (
                     <button
                       key={it.step.id}
                       type="button"
                       onClick={() => setSelected({ colKey: c.key, step: it.step })}
-                      title={it.step.content.slice(0, 60)}
+                      title={
+                        hasToolSpan
+                          ? `${it.step.content.slice(0, 40)}${durLabel ? ' · 耗时 ' + durLabel : ' · 执行中…'}`
+                          : it.step.content.slice(0, 60)
+                      }
                       className={[
-                        'absolute top-1/2 -translate-y-1/2 h-7 px-1.5 rounded text-[10px] text-white flex items-center gap-0.5 transition-all hover:brightness-125 hover:z-10',
+                        'absolute top-1/2 -translate-y-1/2 h-7 rounded text-[10px] text-white flex items-center gap-0.5 transition-all hover:brightness-125 hover:z-10 overflow-hidden',
+                        widthPct ? 'px-1' : 'px-1.5',
                         bg,
                         isDiv ? 'ring-2 ring-red-300 z-[1]' : '',
+                        barRunning ? 'animate-pulse' : '',
                       ].join(' ')}
-                      style={{ left: `${pos(it.ms)}%` }}
+                      style={widthPct ? { left: `${leftPct}%`, width: `${widthPct}%` } : { left: `${leftPct}%` }}
                     >
-                      <span>{icon}</span>
+                      <span className="flex-shrink-0">{icon}</span>
                       {isTool && (
-                        <span className="hidden lg:inline max-w-[80px] truncate">
-                          {it.step.toolCall!.name}
-                        </span>
+                        <span className="truncate">{it.step.toolCall!.name}</span>
                       )}
+                      {durLabel && <span className="flex-shrink-0 opacity-80 hidden xl:inline">·{durLabel}</span>}
                     </button>
                   )
                 })}
@@ -861,7 +888,7 @@ function ComparisonTimeline({ columns }: { columns: AnyColumn[] }) {
       {/* legend */}
       <div className="mt-3 flex items-center gap-4 text-[10px] text-slate-500 flex-wrap">
         <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-slate-500/70 inline-block" />思考</span>
-        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-blue-500/85 inline-block" />工具调用</span>
+        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-blue-500/85 inline-block" />工具调用(条宽=耗时)</span>
         <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-emerald-500/85 inline-block" />最终回答</span>
         <span className="flex items-center gap-1"><span className="w-3 h-3 rounded ring-2 ring-red-300 bg-red-500/85 inline-block" />分歧调用</span>
       </div>
@@ -891,6 +918,13 @@ function TimelineDetail({ step }: { step: AgentStep }) {
             <span className={`ml-1 text-[10px] ${step.toolCall!.status === 'success' ? 'text-emerald-400' : step.toolCall!.status === 'error' ? 'text-red-400' : 'text-slate-400'}`}>
               {step.toolCall!.status}
             </span>
+          </span>
+        )}
+        {isTool && step.toolCall?.startedAt && (
+          <span className="text-[10px] text-slate-500 font-mono">
+            ⏱ {step.toolCall?.endedAt && step.toolCall.startedAt < step.toolCall.endedAt
+              ? `${((step.toolCall.endedAt - step.toolCall.startedAt) / 1000).toFixed(2)}s`
+              : (step.toolCall.status === 'running' ? '执行中…' : '—')}
           </span>
         )}
       </div>

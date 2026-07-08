@@ -651,6 +651,7 @@ export class LiveAgent {
         output: null,
         status: 'running',
         description: `${tc.name}(${tryTruncateArgs(tc.arguments)})`,
+        startedAt: Date.now(),
       }
       const toolStep = makeStep('tool_call', `调用 ${tc.name}`, toolCall)
 
@@ -704,6 +705,7 @@ export class LiveAgent {
         output,
         status,
         error,
+        endedAt: Date.now(),
       }
       this.state = {
         ...this.state,

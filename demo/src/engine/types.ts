@@ -20,6 +20,10 @@ export interface ToolCall {
   error?: string
   /** Human-readable description shown in the timeline */
   description: string
+  /** Real wall-clock epoch ms when the tool invocation started (set by LiveAgent) */
+  startedAt?: number
+  /** Real wall-clock epoch ms when the tool returned (set by LiveAgent) */
+  endedAt?: number
 }
 
 /** The type of an agent step */

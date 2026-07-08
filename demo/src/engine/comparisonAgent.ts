@@ -163,6 +163,8 @@ export class ComparisonAgent {
   private keys: ComparisonKey[]
   /** Per-column model overrides. Empty string / missing => follow global config.model. */
   private modelOverrides: Record<string, string> = {}
+  /** Wall-clock ms when each column's first tool_call was detected (for latency metric). */
+  private firstToolMs: Record<number, number> = {}
 
   constructor(
     config: {
@@ -280,6 +282,7 @@ export class ComparisonAgent {
     if (this.state.isRunning) return
 
     this.stopped = false
+    this.firstToolMs = {}
 
     // Reset all agents
     for (const agent of this.agents) {
@@ -357,6 +360,10 @@ export class ComparisonAgent {
           }
           changed = true
         }
+        // Track first tool call time for the latency metric
+        if (!this.firstToolMs[i] && agentState.steps.some((s) => s.type === 'tool_call')) {
+          this.firstToolMs[i] = Date.now()
+        }
       }
       if (changed) this.emit()
     }, 100)
@@ -385,17 +392,13 @@ export class ComparisonAgent {
       const col = this.state.columns[i]
       const toolSteps = col.steps.filter((s) => s.type === 'tool_call' && s.toolCall)
       const successCount = toolSteps.filter((s) => s.toolCall?.status === 'success').length
-      const firstToolStep = toolSteps[0]
 
       col.metrics = {
         toolCallCount: toolSteps.length,
         successRate: toolSteps.length > 0 ? successCount / toolSteps.length : 1,
         firstToolLatency:
-          firstToolStep && col.startTime
-            ? (() => {
-                const ts = new Date(firstToolStep.timestamp).getTime()
-                return Number.isFinite(ts) ? (ts - col.startTime) / 1000 : null
-              })()
+          this.firstToolMs[i] && col.startTime
+            ? (this.firstToolMs[i] - col.startTime) / 1000
             : null,
         totalDuration:
           col.endTime && col.startTime ? (col.endTime - col.startTime) / 1000 : 0,
@@ -450,8 +453,9 @@ export class ComparisonAgent {
 
   /** Stop all or a specific agent */
   stop(index?: number): void {
-    this.stopped = true
     if (index !== undefined) {
+      // Stopping a single column — don't set the global `stopped` flag,
+      // so the LLM judge can still run for the remaining columns.
       this.agents[index].stop()
       this.state.columns[index] = {
         ...this.state.columns[index],
@@ -459,6 +463,7 @@ export class ComparisonAgent {
         endTime: this.state.columns[index].endTime ?? Date.now(),
       }
     } else {
+      this.stopped = true
       for (let i = 0; i < this.agents.length; i++) {
         this.agents[i].stop()
         this.state.columns[i] = {

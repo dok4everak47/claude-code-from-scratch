@@ -338,7 +338,21 @@ export function ComparisonView({
       ) : (
         <>
           <main className="flex-1 flex flex-col lg:flex-row min-h-0">
-            {comparisonState.columns.map((col, i) => (
+            {(viewingHistory ? viewingHistory.columns : comparisonState.columns).map((rawCol, i) => {
+              // Normalize live + history columns to a common shape
+              const isHist = rawCol.kind === 'history'
+              const col = isHist
+                ? {
+                    key: rawCol.key,
+                    label: rawCol.label,
+                    model: rawCol.model,
+                    steps: rawCol.steps,
+                    error: rawCol.error,
+                    isLoading: false as const,
+                    currentTurn: rawCol.turnCount,
+                  }
+                : rawCol
+              return (
               <section
                 key={col.key}
                 className="flex-1 min-w-0 flex flex-col border-b lg:border-b-0 lg:border-r border-slate-700/50"
@@ -353,16 +367,21 @@ export function ComparisonView({
                     )}
                   </div>
                   <div className="flex items-center gap-1 flex-shrink-0">
-                    <ModelSelect
-                      value={col.model || globalModel}
-                      globalModel={globalModel}
-                      disabled={comparisonState.isRunning}
-                      onChange={(m) => onColumnModelChange(col.key, m)}
-                    />
+                    {!isHist && (
+                      <ModelSelect
+                        value={col.model || globalModel}
+                        globalModel={globalModel}
+                        disabled={comparisonState.isRunning}
+                        onChange={(m) => onColumnModelChange(col.key as ComparisonKey, m)}
+                      />
+                    )}
+                    {isHist && col.model && (
+                      <span className="text-[10px] text-slate-500 font-mono truncate max-w-[120px]" title={col.model}>{col.model}</span>
+                    )}
                     <span className="text-[10px] text-slate-500 font-mono">
                       🔧{col.steps.filter((s) => s.type === 'tool_call').length} · 轮{col.currentTurn}
                     </span>
-                    {col.isLoading && (
+                    {col.isLoading && !isHist && (
                       <button
                         type="button"
                         onClick={() => onStopSingle(i)}
@@ -401,7 +420,8 @@ export function ComparisonView({
                   )}
                 </div>
               </section>
-            ))}
+              )
+            })}
           </main>
 
           <footer className="flex-shrink-0 border-t border-slate-700/50 bg-slate-900/90 backdrop-blur-sm">
@@ -516,7 +536,7 @@ function FinalAnswerCompare({
       <div className="px-4 py-1.5 text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
         💬 最终回答对比
       </div>
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-px bg-slate-700/30 max-h-72 overflow-y-auto">
+      <div className={`grid grid-cols-1 ${items.length === 2 ? 'lg:grid-cols-2' : items.length === 3 ? 'lg:grid-cols-3' : 'lg:grid-cols-1'} gap-px bg-slate-700/30 max-h-72 overflow-y-auto`}>
         {items.map((it) => (
           <div key={it.key} className="bg-slate-900/60 p-3">
             <div className="text-[10px] text-slate-500 mb-1 truncate">{it.label}</div>

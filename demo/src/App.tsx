@@ -339,6 +339,7 @@ export default function App() {
   const handleComparisonRetry = useCallback(() => {
     comparisonAgentRef.current?.reset()
     setComparisonDraft('')
+    setViewingHistory(null)
   }, [])
 
   const handleComparisonStopSingle = useCallback((index: number) => {

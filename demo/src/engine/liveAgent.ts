@@ -55,6 +55,8 @@ export class LiveAgent {
   private callbacks: LiveAgentCallbacks
   private state: LiveSessionState
   private abortController: AbortController | null = null
+  /** Accumulated real token usage across this agent's run. */
+  private usage: { promptTokens: number; completionTokens: number } = { promptTokens: 0, completionTokens: 0 }
 
   constructor(
     config: {
@@ -99,12 +101,13 @@ export class LiveAgent {
 
   /** Get current state snapshot */
   getState(): LiveSessionState {
-    return { ...this.state, messages: [...this.state.messages], steps: [...this.state.steps] }
+    return { ...this.state, messages: [...this.state.messages], steps: [...this.state.steps], usage: this.state.usage ? { ...this.state.usage } : undefined }
   }
 
   /** Reset session to initial empty state */
   reset(): void {
     this.stop()
+    this.usage = { promptTokens: 0, completionTokens: 0 }
     this.state = {
       messages: [],
       steps: [],
@@ -114,6 +117,7 @@ export class LiveAgent {
       phase: 'plan',
       hasPlan: true,
       statusFeed: null,
+      usage: { promptTokens: 0, completionTokens: 0 },
     }
     this.emit()
   }
@@ -146,6 +150,7 @@ export class LiveAgent {
 
     // Reset abort controller
     this.abortController = new AbortController()
+    this.usage = { promptTokens: 0, completionTokens: 0 }
 
     // Add user message
     const userMsg: LiveMessage = {
@@ -390,6 +395,8 @@ export class LiveAgent {
       model,
       messages,
       stream: true,
+      // Ask the provider to include a usage block in the terminal chunk
+      stream_options: { include_usage: true },
     }
     if (openaiTools.length > 0) {
       body.tools = openaiTools
@@ -467,6 +474,16 @@ export class LiveAgent {
           const choice = parsed.choices?.[0]
           if (!choice) continue
 
+          // Real token usage (typically in the terminal chunk)
+          if (parsed.usage) {
+            if (typeof parsed.usage.prompt_tokens === 'number') {
+              this.usage.promptTokens = parsed.usage.prompt_tokens
+            }
+            if (typeof parsed.usage.completion_tokens === 'number') {
+              this.usage.completionTokens = parsed.usage.completion_tokens
+            }
+          }
+
           finishReason = choice.finish_reason ?? finishReason
 
           const delta = choice.delta
@@ -539,6 +556,14 @@ export class LiveAgent {
             accumulatedContent += delta.content
             this.updateStreamingMessage(accumulatedContent)
           }
+          if (parsed.usage) {
+            if (typeof parsed.usage.prompt_tokens === 'number') {
+              this.usage.promptTokens = parsed.usage.prompt_tokens
+            }
+            if (typeof parsed.usage.completion_tokens === 'number') {
+              this.usage.completionTokens = parsed.usage.completion_tokens
+            }
+          }
         } catch { /* ignore */ }
       }
     }
@@ -575,6 +600,12 @@ export class LiveAgent {
             : m,
         ),
       }
+    }
+
+    // Publish the measured token usage onto session state
+    this.state = {
+      ...this.state,
+      usage: { ...this.usage },
     }
 
     return {

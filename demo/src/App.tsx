@@ -91,6 +91,8 @@ export default function App() {
   const comparisonAgentRef = useRef<ComparisonAgent | null>(null)
   const [comparisonDraft, setComparisonDraft] = useState('')
   const [comparisonSubMode, setComparisonSubMode] = useState<'summary' | 'detail'>('summary')
+  /** Per-column model overrides for the comparison mode ('' = follow global). */
+  const [comparisonColumnModels, setComparisonColumnModels] = useState<Record<string, string>>({})
 
   // ---- Multi-Agent mode state ----
   const [multiAgentState, setMultiAgentState] = useState<MultiAgentEngineState>(createMultiAgentEngineState())
@@ -313,9 +315,16 @@ export default function App() {
     if (!text || comparisonState.isRunning) return
     setComparisonDraft('')
     setComparisonSubMode('detail')
+    comparisonAgentRef.current?.setColumnModels(comparisonColumnModels)
     comparisonAgentRef.current?.setActiveKeys(comparisonKeys)
     comparisonAgentRef.current?.run(text)
-  }, [comparisonDraft, comparisonState.isRunning, comparisonKeys])
+  }, [comparisonDraft, comparisonState.isRunning, comparisonKeys, comparisonColumnModels])
+
+  /** Change a single comparison column's model override. */
+  const handleColumnModelChange = useCallback((key: ComparisonKey, model: string) => {
+    setComparisonColumnModels((prev) => ({ ...prev, [key]: model }))
+    comparisonAgentRef.current?.setColumnModel(key, model)
+  }, [])
 
   const handleComparisonStop = useCallback(() => {
     comparisonAgentRef.current?.stop()
@@ -355,6 +364,8 @@ export default function App() {
           key: col.key,
           label: col.label,
           kind: 'history',
+          model: col.model,
+          usage: col.usage ?? null,
           toolCallCount: toolSteps.length,
           toolCallSequence: toolSteps.map((s) => s.toolCall!.name),
           durationMs: col.endTime && col.startTime ? col.endTime - col.startTime : 0,
@@ -392,8 +403,13 @@ export default function App() {
   const handleHistoryRerun = useCallback((entry: ComparisonHistoryEntry) => {
     setComparisonDraft(entry.userMessage)
     setViewingHistory(null)
+    // Restore per-column model overrides from the saved run
+    const models: Record<string, string> = {}
+    for (const c of entry.columns) models[c.key] = c.model
+    setComparisonColumnModels(models)
     // Directly run - don't wait for state to flush
     setComparisonSubMode('detail')
+    comparisonAgentRef.current?.setColumnModels(models)
     comparisonAgentRef.current?.setActiveKeys(entry.columns.map((c) => c.key as ComparisonKey))
     comparisonAgentRef.current?.run(entry.userMessage)
   }, [])
@@ -685,6 +701,8 @@ export default function App() {
           onHistoryRerun={handleHistoryRerun}
           comparisonKeys={comparisonKeys}
           onKeysChange={setComparisonKeys}
+          globalModel={apiConfig.model}
+          onColumnModelChange={handleColumnModelChange}
         />
       )}
 

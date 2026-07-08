@@ -7,6 +7,7 @@
 import { useState } from 'react'
 import type { ComparisonColumnState, ComparisonVerdict } from '@/engine/comparisonAgent'
 import { COMPARISON_KEYS, COMPARISON_PROMPTS, type ComparisonKey } from '@/engine/comparisonAgent'
+import { estimateUsageCostUSD, formatCostCNY, KNOWN_MODELS } from '@/engine/cost'
 import { Button } from '@/components/Button'
 import AgentFlow from '@/components/AgentFlow'
 
@@ -15,6 +16,10 @@ export interface HistoryColumnData {
   kind: 'history'
   key: string
   label: string
+  /** Model used for this column ('' = follow global config). */
+  model: string
+  /** Real token usage measured during the run. */
+  usage: { promptTokens: number; completionTokens: number } | null
   toolCallCount: number
   toolCallSequence: string[]
   durationMs: number
@@ -52,6 +57,10 @@ interface ComparisonViewProps {
   /** Which strategy columns are active (configurable) */
   comparisonKeys: ComparisonKey[]
   onKeysChange: (keys: ComparisonKey[]) => void
+  /** The global model from API settings (used as the "follow global" default). */
+  globalModel: string
+  /** Change a single column's model override. */
+  onColumnModelChange: (key: ComparisonKey, model: string) => void
 }
 
 export function ComparisonView({
@@ -73,6 +82,8 @@ export function ComparisonView({
   onHistoryRerun,
   comparisonKeys,
   onKeysChange,
+  globalModel,
+  onColumnModelChange,
 }: ComparisonViewProps) {
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -277,6 +288,9 @@ export function ComparisonView({
                 data={col}
                 isLast={i === (viewingHistory ? viewingHistory.columns.length - 1 : comparisonState.columns.length - 1)}
                 onStop={() => !viewingHistory && onStopSingle(i)}
+                editable={!viewingHistory && !comparisonState.isRunning}
+                globalModel={globalModel}
+                onModelChange={onColumnModelChange}
               />
             ))}
           </main>
@@ -306,14 +320,17 @@ export function ComparisonView({
                   输入问题并点击「运行」开始对比
                 </div>
               ) : (
-                <>
-                  <ComparisonMetrics columns={comparisonState.columns} />
-                  <div className="border-t border-slate-700/30 my-2" />
-                  {comparisonState.verdict && (
-                    <ComparisonVerdictBlock verdict={comparisonState.verdict} />
-                  )}
-                  <ComparisonSummary columns={comparisonState.columns} />
-                </>
+                  <>
+                    <ComparisonMetrics columns={comparisonState.columns} />
+                    <div className="mt-2">
+                      <ComparisonCostTotal columns={comparisonState.columns} />
+                    </div>
+                    <div className="border-t border-slate-700/30 my-2" />
+                    {comparisonState.verdict && (
+                      <ComparisonVerdictBlock verdict={comparisonState.verdict} />
+                    )}
+                    <ComparisonSummary columns={comparisonState.columns} />
+                  </>
               )}
             </div>
           </footer>
@@ -336,6 +353,12 @@ export function ComparisonView({
                     )}
                   </div>
                   <div className="flex items-center gap-1 flex-shrink-0">
+                    <ModelSelect
+                      value={col.model || globalModel}
+                      globalModel={globalModel}
+                      disabled={comparisonState.isRunning}
+                      onChange={(m) => onColumnModelChange(col.key, m)}
+                    />
                     <span className="text-[10px] text-slate-500 font-mono">
                       🔧{col.steps.filter((s) => s.type === 'tool_call').length} · 轮{col.currentTurn}
                     </span>
@@ -400,6 +423,81 @@ export function ComparisonView({
 }
 
 // ============================================================
+// ModelSelect — compact per-column model override picker
+// ============================================================
+
+function ModelSelect({
+  value,
+  globalModel,
+  disabled,
+  onChange,
+}: {
+  value: string
+  globalModel: string
+  disabled?: boolean
+  onChange: (model: string) => void
+}) {
+  const effective = value || globalModel
+  const options = (() => {
+    const seen = new Set<string>()
+    const list: { value: string; label: string }[] = [
+      { value: '', label: `跟随全局 · ${globalModel}` },
+    ]
+    seen.add('')
+    for (const m of [globalModel, ...KNOWN_MODELS]) {
+      if (m && !seen.has(m)) {
+        seen.add(m)
+        list.push({ value: m, label: m })
+      }
+    }
+    if (effective && !seen.has(effective)) list.push({ value: effective, label: effective })
+    return list
+  })()
+
+  return (
+    <select
+      value={effective}
+      disabled={disabled}
+      onChange={(e) => onChange(e.target.value)}
+      title="为这一列单独选择模型（留空则跟随全局配置）"
+      className="ml-1 bg-slate-800 border border-slate-700 rounded px-1 py-0.5 text-[10px] text-slate-300 font-mono max-w-[140px] focus:outline-none focus:ring-1 focus:ring-blue-500/50 disabled:opacity-50"
+    >
+      {options.map((o) => (
+        <option key={o.value} value={o.value}>
+          {o.label}
+        </option>
+      ))}
+    </select>
+  )
+}
+
+// ============================================================
+// ComparisonCostTotal — aggregate token + cost across columns
+// ============================================================
+
+function ComparisonCostTotal({ columns }: { columns: ComparisonColumnState[] }) {
+  const totalTokens = columns.reduce(
+    (s, c) => s + (c.usage ? c.usage.promptTokens + c.usage.completionTokens : 0),
+    0,
+  )
+  if (totalTokens === 0) return null
+  const totalCost = columns.reduce(
+    (s, c) =>
+      s +
+      (c.usage ? estimateUsageCostUSD(c.model || 'deepseek-chat', c.usage.promptTokens, c.usage.completionTokens) : 0),
+    0,
+  )
+  return (
+    <div className="flex items-center justify-between text-xs">
+      <span className="text-slate-500">合计用量</span>
+      <span className="font-mono text-slate-300">
+        {totalTokens} tok · <span className="text-yellow-400">{formatCostCNY(totalCost)}</span>
+      </span>
+    </div>
+  )
+}
+
+// ============================================================
 // FinalAnswerCompare — side-by-side full final answers
 // ============================================================
 
@@ -438,10 +536,16 @@ function ComparisonCard({
   data,
   isLast,
   onStop,
+  editable,
+  globalModel,
+  onModelChange,
 }: {
   data: ComparisonColumnState | HistoryColumnData
   isLast: boolean
   onStop?: () => void
+  editable?: boolean
+  globalModel?: string
+  onModelChange?: (key: ComparisonKey, model: string) => void
 }) {
   const [expanded, setExpanded] = useState(false)
 
@@ -514,11 +618,22 @@ function ComparisonCard({
           className={`h-full p-3 bg-gradient-to-b ${colors.bg} border-b ${colors.border} flex flex-col gap-2.5`}
         >
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 min-w-0">
               <span className="text-sm">{colors.dot}</span>
-              <span className="text-sm font-semibold text-slate-100">{label}</span>
+              <span className="text-sm font-semibold text-slate-100 truncate">{label}</span>
+              {editable && onModelChange && globalModel != null ? (
+                <ModelSelect
+                  value={data.model || globalModel}
+                  globalModel={globalModel}
+                  onChange={(m) => onModelChange(data.key as ComparisonKey, m)}
+                />
+              ) : data.model ? (
+                <span className="text-[10px] text-slate-500 font-mono truncate max-w-[130px]" title={data.model}>
+                  {data.model}
+                </span>
+              ) : null}
             </div>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 flex-shrink-0">
               {statusIcon}
               {isActuallyLoading && onStop && (
                 <button
@@ -571,6 +686,16 @@ function ComparisonCard({
               <div className="text-[10px] text-slate-500">轮次</div>
             </div>
           </div>
+
+          {data.usage && data.usage.promptTokens + data.usage.completionTokens > 0 && (
+            <div className="flex items-center gap-1 text-[10px] text-slate-500">
+              <span>🪙</span>
+              <span className="font-mono">{data.usage.promptTokens + data.usage.completionTokens} tok</span>
+              <span className="text-yellow-400 font-mono">
+                · {formatCostCNY(estimateUsageCostUSD(data.model || globalModel || 'deepseek-chat', data.usage.promptTokens, data.usage.completionTokens))}
+              </span>
+            </div>
+          )}
 
           {responseSummary && !isActuallyLoading && (
             <div>
@@ -629,6 +754,9 @@ function ComparisonSummaryFromHistory({ columns, userMessage }: {
 }) {
   const lines: string[] = [`📄 问题：${userMessage}`]
 
+  let totalTokens = 0
+  let totalCost = 0
+
   for (const col of columns) {
     const seq = col.toolCallSequence.length > 0
       ? col.toolCallSequence.join(' → ')
@@ -637,8 +765,20 @@ function ComparisonSummaryFromHistory({ columns, userMessage }: {
     if (col.error) {
       lines.push(`• ${col.label} 执行失败：${col.error}`)
     } else {
-      lines.push(`• ${col.label} 调用了 ${col.toolCallCount} 次工具（${seq}），耗时 ${dur}s，共 ${col.turnCount} 轮`)
+      let extra = ''
+      if (col.usage && col.usage.promptTokens + col.usage.completionTokens > 0) {
+        const toks = col.usage.promptTokens + col.usage.completionTokens
+        totalTokens += toks
+        const cost = estimateUsageCostUSD(col.model || 'deepseek-chat', col.usage.promptTokens, col.usage.completionTokens)
+        totalCost += cost
+        extra = `，用量 ${toks} tok（${formatCostCNY(cost)}）`
+      }
+      lines.push(`• ${col.label}${col.model ? ` [${col.model}]` : ''} 调用了 ${col.toolCallCount} 次工具（${seq}），耗时 ${dur}s，共 ${col.turnCount} 轮${extra}`)
     }
+  }
+
+  if (totalTokens > 0) {
+    lines.push(`• 合计用量 ${totalTokens} tok · ${formatCostCNY(totalCost)}`)
   }
 
   const completed = columns.filter((c) => !c.error)
@@ -659,22 +799,32 @@ function ComparisonSummaryFromHistory({ columns, userMessage }: {
 // ============================================================
 
 function ComparisonMetrics({ columns }: { columns: ComparisonColumnState[] }) {
-  const maxCalls = Math.max(...columns.map((c) => c.metrics?.toolCallCount ?? 0))
-  const maxRate = Math.max(...columns.map((c) => c.metrics?.successRate ?? 1))
-  const minLatency = Math.min(
-    ...columns.map((c) => c.metrics?.firstToolLatency ?? Infinity),
-  )
-  const minDuration = Math.min(
-    ...columns.map((c) => c.metrics?.totalDuration ?? Infinity),
-  )
-  const maxSteps = Math.max(...columns.map((c) => c.metrics?.totalSteps ?? 0))
+  type Row = {
+    label: string
+    getValue: (c: ComparisonColumnState) => number | null
+    format: (v: number | null) => string
+    /** 'low' = smaller is better (highlight minimum), 'high' = larger is better, 'none' = no highlight */
+    better: 'low' | 'high' | 'none'
+  }
 
-  const rows: Array<{ label: string; key: keyof import('@/engine/comparisonAgent').ColumnMetrics; format: (v: number | null) => string }> = [
-    { label: '工具调用次数', key: 'toolCallCount', format: (v) => String(v ?? 0) },
-    { label: '成功率', key: 'successRate', format: (v) => v != null ? `${Math.round(v * 100)}%` : '—' },
-    { label: '首次出工具', key: 'firstToolLatency', format: (v) => v != null ? `${v.toFixed(1)}s` : '—' },
-    { label: '总运行时长', key: 'totalDuration', format: (v) => v != null ? `${v.toFixed(1)}s` : '—' },
-    { label: '总步骤数', key: 'totalSteps', format: (v) => String(v ?? 0) },
+  const rows: Row[] = [
+    { label: '工具调用次数', getValue: (c) => c.metrics?.toolCallCount ?? null, format: (v) => String(v ?? 0), better: 'none' },
+    { label: '成功率', getValue: (c) => c.metrics?.successRate ?? null, format: (v) => (v != null ? `${Math.round(v * 100)}%` : '—'), better: 'high' },
+    { label: '首次出工具', getValue: (c) => c.metrics?.firstToolLatency ?? null, format: (v) => (v != null ? `${v.toFixed(1)}s` : '—'), better: 'low' },
+    { label: '总运行时长', getValue: (c) => c.metrics?.totalDuration ?? null, format: (v) => (v != null ? `${v.toFixed(1)}s` : '—'), better: 'low' },
+    { label: '总步骤数', getValue: (c) => c.metrics?.totalSteps ?? null, format: (v) => String(v ?? 0), better: 'none' },
+    {
+      label: 'Token 用量',
+      getValue: (c) => (c.usage ? c.usage.promptTokens + c.usage.completionTokens : null),
+      format: (v) => (v != null ? String(v) : '—'),
+      better: 'low',
+    },
+    {
+      label: '预估成本',
+      getValue: (c) => (c.usage ? estimateUsageCostUSD(c.model || 'deepseek-chat', c.usage.promptTokens, c.usage.completionTokens) : null),
+      format: (v) => (v != null ? formatCostCNY(v) : '—'),
+      better: 'low',
+    },
   ]
 
   return (
@@ -699,41 +849,27 @@ function ComparisonMetrics({ columns }: { columns: ComparisonColumnState[] }) {
             </tr>
           </thead>
           <tbody>
-              {rows.map((row) => {
-                const validVals = columns
-                  .map((c) => c.metrics?.[row.key] ?? null)
-                  .filter((v): v is number => v != null)
-                const hasVariation =
-                  validVals.length > 1 && Math.max(...validVals) !== Math.min(...validVals)
-                return (
-                <tr key={row.key} className="border-b border-slate-700/20 last:border-0">
+            {rows.map((row) => {
+              const vals = columns
+                .map((c) => row.getValue(c))
+                .filter((v): v is number => v != null)
+              const hasVariation = vals.length > 1 && Math.max(...vals) !== Math.min(...vals)
+              const best = row.better === 'low' ? Math.min(...vals) : row.better === 'high' ? Math.max(...vals) : null
+              return (
+                <tr key={row.label} className="border-b border-slate-700/20 last:border-0">
                   <td className="py-1 pr-3 text-slate-400">{row.label}</td>
                   {columns.map((col) => {
-                    const val = col.metrics?.[row.key]
+                    const val = row.getValue(col)
                     const display = row.format(val ?? null)
-                    let kind: 'good' | 'info' | null = null
-                    if (hasVariation && val != null) {
-                      if (row.key === 'successRate') {
-                        // only meaningful when someone failed (rate < 1)
-                        if (val >= maxRate && maxRate < 1) kind = 'good'
-                      } else if (row.key === 'firstToolLatency') {
-                        if (val <= minLatency) kind = 'good'
-                      } else if (row.key === 'totalDuration') {
-                        if (val <= minDuration) kind = 'good'
-                      } else {
-                        // toolCallCount / totalSteps → informational "most", not "better"
-                        if (val >= (row.key === 'toolCallCount' ? maxCalls : maxSteps)) kind = 'info'
-                      }
-                    }
+                    const kind =
+                      hasVariation && best != null && val != null && val === best
+                        ? 'good'
+                        : null
                     return (
                       <td
                         key={col.key}
                         className={`py-1 px-2 text-center font-mono ${
-                          kind === 'good'
-                            ? 'text-emerald-400 font-semibold'
-                            : kind === 'info'
-                              ? 'text-blue-400 font-semibold'
-                              : 'text-slate-300'
+                          kind === 'good' ? 'text-emerald-400 font-semibold' : 'text-slate-300'
                         }`}
                       >
                         {display}
@@ -741,8 +877,8 @@ function ComparisonMetrics({ columns }: { columns: ComparisonColumnState[] }) {
                     )
                   })}
                 </tr>
-                )
-              })}
+              )
+            })}
           </tbody>
         </table>
       </div>

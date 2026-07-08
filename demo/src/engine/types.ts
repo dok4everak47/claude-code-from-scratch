@@ -149,6 +149,8 @@ export interface LiveSessionState {
   hasPlan: boolean
   /** 实时 Agent 状态推送 */
   statusFeed: AgentStatusFeed | null
+  /** 真实 Token 用量（实测，仅真 LLM 运行时填充） */
+  usage?: { promptTokens: number; completionTokens: number }
 }
 
 /** Real-time status feed pushed during agent execution */

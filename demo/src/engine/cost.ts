@@ -34,6 +34,26 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
 
 export const USD_TO_CNY = 7.2
 
+/** Curated list of common OpenAI-compatible model ids (for the UI dropdown). */
+export const KNOWN_MODELS = [
+  'deepseek-v4-flash',
+  'deepseek-chat',
+  'deepseek-reasoner',
+  'gpt-4o',
+  'gpt-4o-mini',
+  'gpt-4-turbo',
+  'gpt-3.5-turbo',
+  'o3-mini',
+  'o1',
+  'claude-3-5-sonnet',
+  'claude-3-5-haiku',
+  'claude-3-opus',
+  'qwen-max',
+  'qwen-plus',
+  'gemini-1.5-pro',
+  'gemini-1.5-flash',
+]
+
 /** Fuzzy-match a model id to a pricing entry; fall back to a conservative default. */
 export function getModelPricing(model: string): ModelPricing {
   const m = model.toLowerCase()
@@ -91,4 +111,14 @@ export function formatCostCNY(usd: number): string {
   const cny = usd * USD_TO_CNY
   if (cny < 0.01) return '¥0.01 内'
   return `¥${cny.toFixed(2)}`
+}
+
+/** Compute the real USD cost of an already-observed usage total for a given model. */
+export function estimateUsageCostUSD(
+  model: string,
+  promptTokens: number,
+  completionTokens: number,
+): number {
+  const p = getModelPricing(model)
+  return (promptTokens / 1e6) * p.in + (completionTokens / 1e6) * p.out
 }

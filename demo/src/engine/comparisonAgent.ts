@@ -71,6 +71,10 @@ export interface ComparisonColumnState {
   kind: 'live'
   key: ComparisonKey
   label: string
+  /** Model used for this column ('' = follow global config). */
+  model: string
+  /** Real token usage measured during the run (null until finished). */
+  usage: { promptTokens: number; completionTokens: number } | null
   messages: LiveMessage[]
   steps: AgentStep[]
   isLoading: boolean
@@ -112,11 +116,13 @@ export interface ComparisonState {
   verdict: ComparisonVerdict | null
 }
 
-function createColumnState(key: ComparisonKey): ComparisonColumnState {
+function createColumnState(key: ComparisonKey, model = ''): ComparisonColumnState {
   return {
     key,
     label: COMPARISON_PROMPTS[key].label,
     kind: 'live',
+    model,
+    usage: null,
     messages: [],
     steps: [],
     isLoading: false,
@@ -128,9 +134,12 @@ function createColumnState(key: ComparisonKey): ComparisonColumnState {
   }
 }
 
-export function createComparisonState(keys: ComparisonKey[] = [...COMPARISON_KEYS]): ComparisonState {
+export function createComparisonState(
+  keys: ComparisonKey[] = [...COMPARISON_KEYS],
+  models: Record<string, string> = {},
+): ComparisonState {
   return {
-    columns: keys.map(createColumnState),
+    columns: keys.map((key) => createColumnState(key, models[key] ?? '')),
     isRunning: false,
     userMessage: '',
     verdict: null,
@@ -152,6 +161,8 @@ export class ComparisonAgent {
   private config: LLMConfig
   private stopped = false
   private keys: ComparisonKey[]
+  /** Per-column model overrides. Empty string / missing => follow global config.model. */
+  private modelOverrides: Record<string, string> = {}
 
   constructor(
     config: {
@@ -162,12 +173,27 @@ export class ComparisonAgent {
     },
     callbacks: ComparisonCallbacks,
     keys: ComparisonKey[] = [...COMPARISON_KEYS],
+    modelOverrides: Record<string, string> = {},
   ) {
     this.callbacks = callbacks
     this.config = { ...config }
     this.keys = keys.length ? keys : [...COMPARISON_KEYS]
-    this.state = createComparisonState(this.keys)
+    this.modelOverrides = { ...modelOverrides }
+    this.state = createComparisonState(this.keys, this.modelOverrides)
     this.buildAgents()
+  }
+
+  /** Effective model for a given strategy key (override wins, else global config). */
+  private effectiveModel(key: ComparisonKey): string {
+    return this.modelOverrides[key] || this.config.model || 'deepseek-chat'
+  }
+
+  /** Sync the `model` label onto each live column state. */
+  private applyColumnModels(): void {
+    for (let i = 0; i < this.state.columns.length; i++) {
+      const key = this.keys[i]
+      this.state.columns[i] = { ...this.state.columns[i], model: key ? this.effectiveModel(key) : '' }
+    }
   }
 
   /** (Re)build the LiveAgent instances for the active strategy keys */
@@ -177,7 +203,7 @@ export class ComparisonAgent {
         {
           apiKey: this.config.apiKey,
           baseUrl: this.config.baseUrl,
-          model: this.config.model,
+          model: this.effectiveModel(key),
           maxTurns: this.config.maxTurns ?? 10,
           systemPrompt: COMPARISON_PROMPTS[key].prompt,
         },
@@ -199,9 +225,35 @@ export class ComparisonAgent {
       const key = this.keys[i]
       this.agents[i].setConfig({
         ...config,
+        model: this.effectiveModel(key),
         systemPrompt: COMPARISON_PROMPTS[key].prompt,
       })
     }
+  }
+
+  /** Bulk-set per-column model overrides ('' = follow global). Rebuilds agents. */
+  setColumnModels(overrides: Record<string, string>): void {
+    this.modelOverrides = { ...overrides }
+    this.buildAgents()
+    this.applyColumnModels()
+    this.emit()
+  }
+
+  /** Set a single column's model override ('' = follow global). Rebuilds that agent. */
+  setColumnModel(key: ComparisonKey, model: string): void {
+    this.modelOverrides[key] = model
+    const i = this.keys.indexOf(key)
+    if (i >= 0 && this.agents[i]) {
+      this.agents[i].setConfig({
+        apiKey: this.config.apiKey,
+        baseUrl: this.config.baseUrl,
+        model: this.effectiveModel(key),
+        maxTurns: this.config.maxTurns ?? 10,
+        systemPrompt: COMPARISON_PROMPTS[key].prompt,
+      })
+      this.state.columns[i] = { ...this.state.columns[i], model: this.effectiveModel(key) }
+    }
+    this.emit()
   }
 
   getState(): ComparisonState {
@@ -219,7 +271,7 @@ export class ComparisonAgent {
     if (next.join(',') === this.keys.join(',')) return
     this.keys = next
     this.buildAgents()
-    this.state = createComparisonState(this.keys)
+    this.state = createComparisonState(this.keys, this.modelOverrides)
     this.emit()
   }
 
@@ -238,7 +290,7 @@ export class ComparisonAgent {
     const now = Date.now()
     this.state = {
       columns: this.keys.map((key) => ({
-        ...createColumnState(key),
+        ...createColumnState(key, this.effectiveModel(key)),
         startTime: now,
       })),
       isRunning: true,
@@ -251,9 +303,11 @@ export class ComparisonAgent {
     const promises = this.agents.map((agent, i) =>
       agent.run(userMessage).then(
         () => {
+          const agentState = agent.getState()
           this.state.columns[i] = {
             ...this.state.columns[i],
             ...syncColumnFromAgent(agent),
+            usage: agentState.usage ?? null,
             isLoading: false,
             endTime: Date.now(),
           }
@@ -266,6 +320,7 @@ export class ComparisonAgent {
             ...this.state.columns[i],
             messages: agentState.messages,
             steps: agentState.steps,
+            usage: agentState.usage ?? null,
             isLoading: false,
             currentTurn: agentState.currentTurn,
             error: err instanceof Error ? err.message : '未知错误',
@@ -287,7 +342,9 @@ export class ComparisonAgent {
           col.steps !== agentState.steps ||
           col.isLoading !== agentState.isLoading ||
           col.currentTurn !== agentState.currentTurn ||
-          col.error !== agentState.error
+          col.error !== agentState.error ||
+          (agentState.usage?.promptTokens ?? 0) + (agentState.usage?.completionTokens ?? 0) !==
+            (col.usage?.promptTokens ?? 0) + (col.usage?.completionTokens ?? 0)
         ) {
           this.state.columns[i] = {
             ...col,
@@ -296,6 +353,7 @@ export class ComparisonAgent {
             isLoading: agentState.isLoading,
             currentTurn: agentState.currentTurn,
             error: agentState.error,
+            usage: agentState.usage ?? col.usage,
           }
           changed = true
         }
@@ -314,6 +372,7 @@ export class ComparisonAgent {
         ...this.state.columns[i],
         messages: agentState.messages,
         steps: agentState.steps,
+        usage: agentState.usage ?? null,
         isLoading: false,
         currentTurn: agentState.currentTurn,
         error: agentState.error,
@@ -419,7 +478,7 @@ export class ComparisonAgent {
     for (const agent of this.agents) {
       agent.reset()
     }
-    this.state = createComparisonState()
+    this.state = createComparisonState(this.keys, this.modelOverrides)
     this.emit()
   }
 

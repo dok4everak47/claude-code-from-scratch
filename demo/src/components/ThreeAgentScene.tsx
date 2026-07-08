@@ -17,6 +17,29 @@ import type {
 } from '@/engine/types'
 
 // ============================================================
+// Theme detection — the 3D canvas is WebGL (not affected by the
+// .theme-light CSS overrides), so it must read the theme itself.
+// ============================================================
+
+function useIsLightTheme(): boolean {
+  const [isLight, setIsLight] = useState(
+    () =>
+      typeof document !== 'undefined' &&
+      document.documentElement.classList.contains('theme-light'),
+  )
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+    const el = document.documentElement
+    const update = () => setIsLight(el.classList.contains('theme-light'))
+    update()
+    const observer = new MutationObserver(update)
+    observer.observe(el, { attributes: true, attributeFilter: ['class'] })
+    return () => observer.disconnect()
+  }, [])
+  return isLight
+}
+
+// ============================================================
 // Constants
 // ============================================================
 
@@ -59,6 +82,9 @@ interface ThreeAgentSceneProps {
   snapshot: MultiAgentSnapshot | null
   onNodeClick: (id: string) => void
   activeConnections: Map<string, { message: AgentMessage; isNew: boolean }>
+  /** Light vs dark theme — drives WebGL colors (CSS overrides don't reach the canvas).
+   *  Optional: if omitted, the scene detects the theme itself via .theme-light on <html>. */
+  isLight?: boolean
 }
 
 // ============================================================
@@ -71,6 +97,7 @@ function SceneContent({
   snapshot,
   onNodeClick,
   activeConnections,
+  isLight = false,
 }: ThreeAgentSceneProps) {
   const rootPos = useMemo(() => new THREE.Vector3(0, 0.3, 0), [])
 
@@ -135,7 +162,7 @@ function SceneContent({
       <pointLight position={[5, -5, 5]} intensity={0.3} color="#3b82f6" />
 
       {/* Fog */}
-      <fog attach="fog" args={['#0f172a', 10, 20]} />
+      <fog attach="fog" args={[isLight ? '#f1f5f9' : '#0f172a', 10, 20]} />
 
       {/* Controls */}
       <OrbitControls enableDamping dampingFactor={0.05} minDistance={3} maxDistance={20} target={new THREE.Vector3(0, 0, -1)} />
@@ -148,6 +175,7 @@ function SceneContent({
           position={rootPos}
           radius={0.8}
           onClick={() => onNodeClick(rootNode.id)}
+          isLight={isLight}
         />
       )}
 
@@ -160,6 +188,7 @@ function SceneContent({
           position={childPositions[i]}
           radius={0.6}
           onClick={() => onNodeClick(child.id)}
+          isLight={isLight}
         />
       ))}
 
@@ -175,6 +204,7 @@ function SceneContent({
               end={childPositions[i]}
               isActive={conn !== undefined}
               isNew={conn?.isNew ?? false}
+              isLight={isLight}
             />
           )
         })}
@@ -197,12 +227,14 @@ function AgentNode3D({
   position,
   radius,
   onClick,
+  isLight,
 }: {
   node: AgentNode
   status: MultiAgentStatus
   position: THREE.Vector3
   radius: number
   onClick: () => void
+  isLight: boolean
 }) {
   const groupRef = useRef<THREE.Group>(null)
   const [hovered, setHovered] = useState(false)
@@ -265,12 +297,12 @@ function AgentNode3D({
       <StatusRing status={status} radius={radius * 1.35} />
 
       {/* Name label above */}
-      <Text position={[0, radius + 0.55, 0]} fontSize={0.3} color="#e2e8f0" anchorX="center" anchorY="middle" fontWeight="bold">
+      <Text position={[0, radius + 0.55, 0]} fontSize={0.3} color={isLight ? '#0f172a' : '#e2e8f0'} anchorX="center" anchorY="middle" fontWeight="bold">
         {node.name}
       </Text>
 
       {/* Status label below */}
-      <Text position={[0, -radius - 0.4, 0]} fontSize={0.18} color="#94a3b8" anchorX="center" anchorY="middle">
+      <Text position={[0, -radius - 0.4, 0]} fontSize={0.18} color={isLight ? '#475569' : '#94a3b8'} anchorX="center" anchorY="middle">
         {STATUS_LABEL[status]}
       </Text>
     </group>
@@ -337,11 +369,13 @@ function ConnectionLine({
   end,
   isActive,
   isNew,
+  isLight,
 }: {
   start: THREE.Vector3
   end: THREE.Vector3
   isActive: boolean
   isNew: boolean
+  isLight: boolean
 }) {
   const tubeGeo = useMemo(() => {
     const mid = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5)
@@ -350,7 +384,7 @@ function ConnectionLine({
     return new THREE.TubeGeometry(c, 16, 0.025, 8, false)
   }, [start, end])
 
-  const color = isNew ? '#60a5fa' : isActive ? '#10b981' : '#334155'
+  const color = isNew ? '#60a5fa' : isActive ? '#10b981' : isLight ? '#cbd5e1' : '#334155'
 
   return (
     <mesh geometry={tubeGeo}>
@@ -414,6 +448,7 @@ function MessageParticle({
 // ============================================================
 
 export default function ThreeAgentScene(props: ThreeAgentSceneProps) {
+  const isLight = useIsLightTheme()
   return (
     <div className="w-full h-full min-h-[300px]">
       <Canvas
@@ -421,7 +456,7 @@ export default function ThreeAgentScene(props: ThreeAgentSceneProps) {
         gl={{ antialias: true }}
         style={{ background: 'transparent' }}
       >
-        <SceneContent {...props} />
+        <SceneContent {...props} isLight={props.isLight ?? isLight} />
       </Canvas>
     </div>
   )

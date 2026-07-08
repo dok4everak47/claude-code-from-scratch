@@ -375,7 +375,12 @@ export function ComparisonView({
                   </div>
                 </div>
                 <div className="flex-1 overflow-y-auto p-2 min-h-0">
-                  {col.steps.length === 0 && !col.isLoading ? (
+                  {col.isLoading && col.steps.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center h-full text-slate-500 gap-2">
+                      <span className="spin inline-block w-4 h-4 border-2 border-slate-400/30 border-t-slate-400 rounded-full" />
+                      <p className="text-[11px] text-center px-2">正在连接模型，等待首批结果…</p>
+                    </div>
+                  ) : col.steps.length === 0 && !col.isLoading ? (
                     <div className="flex flex-col items-center justify-center h-full text-slate-600 gap-2">
                       <span className="text-2xl">
                         {col.key === 'default' ? '🧠' : col.key === 'aggressive' ? '⚡' : '🛡️'}

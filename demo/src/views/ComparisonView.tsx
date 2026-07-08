@@ -896,31 +896,50 @@ function ComparisonTimeline({ columns }: { columns: AnyColumn[] }) {
                     hasToolSpan && typeof it.toolEnd === 'number'
                       ? `${((it.toolEnd - it.toolStart!) / 1000).toFixed(1)}s`
                       : ''
+                  const relTime = `${((it.ms - gMin) / 1000).toFixed(1)}s`
+                  const showInlineDur = !!(durLabel && widthPct && widthPct >= 6)
                   return (
-                    <button
-                      key={it.step.id}
-                      type="button"
-                      onClick={() => setSelected({ colKey: c.key, step: it.step })}
-                      title={
-                        hasToolSpan
-                          ? `${it.step.content.slice(0, 40)}${durLabel ? ' · 耗时 ' + durLabel : ' · 执行中…'}`
-                          : it.step.content.slice(0, 60)
-                      }
-                      className={[
-                        'absolute top-1/2 -translate-y-1/2 h-6 rounded text-[10px] text-white flex items-center gap-0.5 transition-all hover:brightness-125 hover:z-10 overflow-hidden',
-                        widthPct ? 'px-1' : 'px-1.5',
-                        bg,
-                        isDiv ? 'ring-2 ring-red-300 z-[1]' : '',
-                        barRunning ? 'animate-pulse' : '',
-                      ].join(' ')}
-                      style={widthPct ? { left: `${leftPct}%`, width: `${widthPct}%` } : { left: `${leftPct}%` }}
-                    >
-                      <span className="flex-shrink-0">{icon}</span>
-                      {isTool && (
-                        <span className="truncate">{it.step.toolCall!.name}</span>
+                    <>
+                      <button
+                        key={it.step.id}
+                        type="button"
+                        onClick={() => setSelected({ colKey: c.key, step: it.step })}
+                        title={
+                          hasToolSpan
+                            ? `${it.step.content.slice(0, 40)}${durLabel ? ' · 耗时 ' + durLabel : ' · 执行中…'}`
+                            : `${it.step.content.slice(0, 60)} · @${relTime}`
+                        }
+                        className={[
+                          'absolute top-1/2 -translate-y-1/2 h-6 rounded text-[10px] text-white flex items-center gap-0.5 transition-all hover:brightness-125 hover:z-10 overflow-hidden',
+                          widthPct ? 'px-1' : 'px-1.5',
+                          bg,
+                          isDiv ? 'ring-2 ring-red-300 z-[1]' : '',
+                          barRunning ? 'animate-pulse' : '',
+                        ].join(' ')}
+                        style={widthPct ? { left: `${leftPct}%`, width: `${widthPct}%` } : { left: `${leftPct}%` }}
+                      >
+                        <span className="flex-shrink-0">{icon}</span>
+                        {isTool && (
+                          <span className="truncate">{it.step.toolCall!.name}</span>
+                        )}
+                        {/* duration / relative time — inline when the bar is wide enough */}
+                        {showInlineDur && (
+                          <span className="flex-shrink-0 opacity-90 font-mono">·{durLabel}</span>
+                        )}
+                        {isResponse && (
+                          <span className="flex-shrink-0 opacity-90 font-mono">@{relTime}</span>
+                        )}
+                      </button>
+                      {/* narrow bar: float the duration just to its right so every tool's time is visible */}
+                      {durLabel && !showInlineDur && (
+                        <span
+                          className="absolute top-1/2 -translate-y-1/2 text-[9px] font-mono text-blue-200 bg-slate-900/90 border border-slate-700/60 rounded px-1 pointer-events-none z-[2] whitespace-nowrap"
+                          style={{ left: `${Math.min(98.5, leftPct + (widthPct ?? 1.5))}%` }}
+                        >
+                          {durLabel}
+                        </span>
                       )}
-                      {durLabel && <span className="flex-shrink-0 opacity-80 hidden xl:inline">·{durLabel}</span>}
-                    </button>
+                    </>
                   )
                 })}
               </div>

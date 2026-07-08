@@ -798,17 +798,20 @@ function ComparisonTimeline({ columns }: { columns: AnyColumn[] }) {
         </div>
       ) : (
         <div className="relative min-w-[640px]">
-          {/* time axis header */}
-          <div className="relative h-5 mb-1 ml-28 border-b border-slate-700/40">
-            {ticks.map((t, i) => (
-              <span
-                key={i}
-                className="absolute text-[9px] text-slate-600 font-mono -translate-x-1/2"
-                style={{ left: `${pos(t)}%` }}
-              >
-                {((t - gMin) / 1000).toFixed(1)}s
-              </span>
-            ))}
+          {/* time axis header — sticky + shares the exact lane flex layout so ticks stay aligned with lanes while scrolling */}
+          <div className="sticky top-0 z-10 flex items-stretch bg-slate-900/95 backdrop-blur mb-1">
+            <div className="w-28 flex-shrink-0" />
+            <div className="relative flex-1 min-w-0 h-5 border-x border-b border-slate-700/40">
+              {ticks.map((t, i) => (
+                <span
+                  key={i}
+                  className="absolute text-[9px] text-slate-600 font-mono -translate-x-1/2"
+                  style={{ left: `${pos(t)}%` }}
+                >
+                  {((t - gMin) / 1000).toFixed(1)}s
+                </span>
+              ))}
+            </div>
           </div>
 
           {norm.map((c) => (
@@ -819,7 +822,7 @@ function ComparisonTimeline({ columns }: { columns: AnyColumn[] }) {
                 <span className="text-xs text-slate-300 truncate">{c.label}</span>
               </div>
               {/* lane track */}
-              <div className="relative flex-1 h-11 bg-slate-800/30 rounded border border-slate-700/40">
+              <div className="relative flex-1 min-w-0 h-11 bg-slate-800/30 rounded border border-slate-700/40">
                 {ticks.map((t, i) => (
                   <div
                     key={i}

@@ -5,7 +5,7 @@
 // ============================================================
 
 import { useState } from 'react'
-import type { ComparisonColumnState } from '@/engine/comparisonAgent'
+import type { ComparisonColumnState, ComparisonVerdict } from '@/engine/comparisonAgent'
 import { Button } from '@/components/Button'
 import AgentFlow from '@/components/AgentFlow'
 
@@ -268,6 +268,9 @@ export function ComparisonView({
                 <>
                   <ComparisonMetrics columns={comparisonState.columns} />
                   <div className="border-t border-slate-700/30 my-2" />
+                  {comparisonState.verdict && (
+                    <ComparisonVerdictBlock verdict={comparisonState.verdict} />
+                  )}
                   <ComparisonSummary columns={comparisonState.columns} />
                 </>
               )}
@@ -706,9 +709,61 @@ function ComparisonMetrics({ columns }: { columns: ComparisonColumnState[] }) {
 }
 
 // ============================================================
-// ComparisonSummary — auto-generated text at the bottom
+// ComparisonVerdictBlock — LLM judge qualitative comparison
 // ============================================================
 
+function ScoreDots({ label, value }: { label: string; value: number }) {
+  return (
+    <span className="flex items-center gap-1 flex-shrink-0">
+      <span className="text-[10px] text-slate-500">{label}</span>
+      <span className="flex gap-0.5">
+        {[1, 2, 3, 4, 5].map((n) => (
+          <span
+            key={n}
+            className={`w-1.5 h-1.5 rounded-full ${n <= value ? 'bg-blue-500' : 'bg-slate-700'}`}
+          />
+        ))}
+      </span>
+    </span>
+  )
+}
+
+function ComparisonVerdictBlock({ verdict }: { verdict: ComparisonVerdict }) {
+  const winnerLabel = verdict.winner
+    ? verdict.columns.find((c) => c.key === verdict.winner)?.label ?? verdict.winner
+    : null
+  return (
+    <div className="mb-2">
+      <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">
+        🧑‍⚖️ LLM 评审
+      </div>
+      <div className="space-y-1.5">
+        {verdict.columns.map((c) => (
+          <div key={c.key} className="flex items-center gap-2 text-xs">
+            <span className="w-16 truncate text-slate-300 flex-shrink-0">{c.label}</span>
+            <ScoreDots label="相关" value={c.relevance} />
+            <ScoreDots label="准确" value={c.accuracy} />
+            <ScoreDots label="效率" value={c.efficiency} />
+            <span className="text-slate-400 truncate flex-1">{c.comment}</span>
+          </div>
+        ))}
+      </div>
+      {winnerLabel && (
+        <div className="mt-1.5 text-xs">
+          <span className="text-slate-500">综合最佳：</span>
+          <span className="text-emerald-400 font-semibold">{winnerLabel}</span>
+        </div>
+      )}
+      {verdict.rationale && (
+        <p className="mt-1 text-xs text-slate-400 leading-relaxed">{verdict.rationale}</p>
+      )}
+    </div>
+  )
+}
+
+// ============================================================
+// ComparisonSummary — auto-generated text at the bottom
+// ============================================================
 function ComparisonSummary({ columns }: { columns: ComparisonColumnState[] }) {
   const lines: string[] = []
 

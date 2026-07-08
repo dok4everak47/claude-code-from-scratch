@@ -5,6 +5,7 @@
 
 import { LiveAgent } from './liveAgent'
 import { liveTools } from './liveTools'
+import { streamChat, type LLMConfig } from './llm'
 import type { AgentStep, LiveMessage } from './types'
 
 // ---- 3 System Prompts ----
@@ -79,10 +80,35 @@ export interface ComparisonColumnState {
   metrics: ColumnMetrics | null
 }
 
+export interface ColumnVerdict {
+  /** Strategy key */
+  key: ComparisonKey
+  /** Human label */
+  label: string
+  /** Answer relevance to the question, 1-5 */
+  relevance: number
+  /** Factual accuracy, 1-5 */
+  accuracy: number
+  /** Tool-use efficiency (did it call the right tools, not over/under), 1-5 */
+  efficiency: number
+  /** One-line comment */
+  comment: string
+}
+
+export interface ComparisonVerdict {
+  columns: ColumnVerdict[]
+  /** Best overall strategy key, or null if no clear winner */
+  winner: ComparisonKey | null
+  /** 2-3 sentence conclusion */
+  rationale: string
+}
+
 export interface ComparisonState {
   columns: ComparisonColumnState[]
   isRunning: boolean
   userMessage: string
+  /** LLM judge verdict (null until a run completes with >=2 answers) */
+  verdict: ComparisonVerdict | null
 }
 
 function createColumnState(key: ComparisonKey): ComparisonColumnState {
@@ -105,6 +131,7 @@ export function createComparisonState(): ComparisonState {
     columns: COMPARISON_KEYS.map(createColumnState),
     isRunning: false,
     userMessage: '',
+    verdict: null,
   }
 }
 
@@ -120,6 +147,8 @@ export class ComparisonAgent {
   private agents: LiveAgent[]
   private callbacks: ComparisonCallbacks
   private state: ComparisonState
+  private config: LLMConfig
+  private stopped = false
 
   constructor(
     config: {
@@ -131,8 +160,8 @@ export class ComparisonAgent {
     callbacks: ComparisonCallbacks,
   ) {
     this.callbacks = callbacks
+    this.config = { ...config }
     this.state = createComparisonState()
-
     // Create 3 LiveAgent instances, one per prompt
     this.agents = COMPARISON_KEYS.map((key) => {
       const agent = new LiveAgent(
@@ -153,6 +182,7 @@ export class ComparisonAgent {
 
   /** Update config for all agents */
   setConfig(config: { apiKey: string; baseUrl: string; model: string; maxTurns: number }): void {
+    this.config = { ...config }
     for (let i = 0; i < this.agents.length; i++) {
       const key = COMPARISON_KEYS[i]
       this.agents[i].setConfig({
@@ -167,12 +197,15 @@ export class ComparisonAgent {
       columns: this.state.columns.map((c) => ({ ...c, messages: [...c.messages], steps: [...c.steps] })),
       isRunning: this.state.isRunning,
       userMessage: this.state.userMessage,
+      verdict: this.state.verdict,
     }
   }
 
   /** Run all 3 agents in parallel with the same user message */
   async run(userMessage: string): Promise<void> {
     if (this.state.isRunning) return
+
+    this.stopped = false
 
     // Reset all agents
     for (const agent of this.agents) {
@@ -188,6 +221,7 @@ export class ComparisonAgent {
       })),
       isRunning: true,
       userMessage,
+      verdict: null,
     }
     this.emit()
 
@@ -288,12 +322,54 @@ export class ComparisonAgent {
       }
     }
 
+    // LLM judge — qualitative comparison (skip if the user stopped the run)
+    if (!this.stopped && this.state.columns.filter((c) => c.steps.some((s) => s.type === 'response')).length >= 2) {
+      try {
+        this.state.verdict = await this.judge()
+      } catch {
+        this.state.verdict = null
+      }
+      this.emit()
+    }
+
     this.state.isRunning = false
     this.emit()
   }
 
+  /** Build a single LLM call that scores/compares the three final answers */
+  private async judge(): Promise<ComparisonVerdict | null> {
+    const answers = this.state.columns
+      .filter((c) => !c.error && c.steps.some((s) => s.type === 'response'))
+      .map((c) => ({
+        key: c.key,
+        label: c.label,
+        text: c.steps.find((s) => s.type === 'response')?.content ?? '',
+      }))
+    if (answers.length < 2) return null
+
+    const prompt = [
+      '你是一个严格的 AI 回答质量评审员。同一个问题被多种策略的 Agent 分别回答，请对比评估它们的回答质量。',
+      `原始问题：${this.state.userMessage}`,
+      '',
+      ...answers.map((a, i) => `[${i + 1}] ${a.label}\n${a.text}`),
+      '',
+      '请只输出一个 JSON 对象（不要使用 markdown 代码块），结构严格如下：',
+      '{"columns":[{"key":"<策略key>","label":"<策略名>","relevance":<1-5整数>,"accuracy":<1-5整数>,"efficiency":<1-5整数>,"comment":"<一句话点评>"}, ...],"winner":"<综合最佳策略的key，若无明显最佳填 null>","rationale":"<2-3 句综合结论>"}',
+      `可用的 key 仅限：${answers.map((a) => a.key).join('、')}`,
+    ].join('\n')
+
+    const { content } = await streamChat(
+      this.config,
+      [{ role: 'user', content: prompt }],
+      [],
+      {},
+    )
+    return parseVerdict(content, answers)
+  }
+
   /** Stop all or a specific agent */
   stop(index?: number): void {
+    this.stopped = true
     if (index !== undefined) {
       this.agents[index].stop()
       this.state.columns[index] = {
@@ -339,4 +415,50 @@ function syncColumnFromAgent(agent: LiveAgent) {
     currentTurn: s.currentTurn,
     error: s.error,
   }
+}
+
+/** Clamp an LLM-provided score to the 1-5 integer range */
+function clampScore(v: unknown): number {
+  const n = Math.round(Number(v))
+  if (!Number.isFinite(n)) return 0
+  return Math.max(1, Math.min(5, n))
+}
+
+/** Defensively parse the judge's JSON verdict */
+function parseVerdict(
+  raw: string,
+  answers: { key: ComparisonKey; label: string }[],
+): ComparisonVerdict | null {
+  const stripped = raw.replace(/```json|```/g, '').trim()
+  let parsed: any = null
+  try {
+    parsed = JSON.parse(stripped)
+  } catch {
+    const m = raw.match(/\{[\s\S]*\}/)
+    if (m) {
+      try {
+        parsed = JSON.parse(m[0])
+      } catch {
+        return null
+      }
+    }
+  }
+  if (!parsed || !Array.isArray(parsed.columns)) return null
+
+  const columns: ColumnVerdict[] = parsed.columns
+    .filter((c: any) => answers.some((a) => a.key === c.key))
+    .map((c: any) => ({
+      key: c.key,
+      label: c.label ?? answers.find((a) => a.key === c.key)?.label ?? c.key,
+      relevance: clampScore(c.relevance),
+      accuracy: clampScore(c.accuracy),
+      efficiency: clampScore(c.efficiency),
+      comment: typeof c.comment === 'string' ? c.comment : '',
+    }))
+  if (columns.length === 0) return null
+
+  const winnerKey = parsed.winner
+  const winner = answers.some((a) => a.key === winnerKey) ? (winnerKey as ComparisonKey) : null
+  const rationale = typeof parsed.rationale === 'string' ? parsed.rationale : ''
+  return { columns, winner, rationale }
 }

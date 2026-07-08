@@ -16,7 +16,8 @@ interface AppShellProps {
 
 export function AppShell({ mode, onModeChange, rightSlot, subHeader, children }: AppShellProps) {
   return (
-    <div className="h-screen bg-slate-950 text-slate-100 flex flex-col overflow-hidden">
+    <div className="relative h-screen bg-slate-950 text-slate-100 flex flex-col overflow-hidden">
+      <div className="pointer-events-none absolute inset-0 ambient-glow" aria-hidden="true" />
       <TopBar mode={mode} onModeChange={onModeChange} rightSlot={rightSlot} />
       {subHeader}
       <main className="flex-1 min-h-0">{children}</main>

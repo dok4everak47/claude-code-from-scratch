@@ -11,7 +11,7 @@ interface CardProps {
 
 function CardBase({ className = '', children }: CardProps) {
   return (
-    <div className={`bg-slate-800 border border-slate-700/50 rounded-xl shadow-lg shadow-black/20 ${className}`}>
+    <div className={`bg-slate-900/70 backdrop-blur-xl ring-1 ring-inset ring-white/5 border border-slate-700/50 rounded-xl shadow-lg shadow-black/20 ${className}`}>
       {children}
     </div>
   )

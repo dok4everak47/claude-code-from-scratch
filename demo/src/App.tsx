@@ -130,7 +130,7 @@ export default function App() {
 
   // ---- History state ----
   const HISTORY_STORAGE_KEY = 'demo-comparison-history'
-  const MAX_HISTORY = 20
+  const MAX_HISTORY = 12
 
   const [comparisonHistory, setComparisonHistory] = useState<ComparisonHistoryEntry[]>(() => {
     try {
@@ -352,11 +352,13 @@ export default function App() {
         return {
           key: col.key,
           label: col.label,
+          kind: 'history',
           toolCallCount: toolSteps.length,
           toolCallSequence: toolSteps.map((s) => s.toolCall!.name),
           durationMs: col.endTime && col.startTime ? col.endTime - col.startTime : 0,
           turnCount: col.currentTurn,
           summary: (col.steps.find((s) => s.type === 'response')?.content ?? '').slice(0, 200),
+          steps: col.steps,
           error: col.error,
         }
       }),

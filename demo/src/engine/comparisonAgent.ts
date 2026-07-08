@@ -68,6 +68,7 @@ export interface ColumnMetrics {
 }
 
 export interface ComparisonColumnState {
+  kind: 'live'
   key: ComparisonKey
   label: string
   messages: LiveMessage[]
@@ -115,6 +116,7 @@ function createColumnState(key: ComparisonKey): ComparisonColumnState {
   return {
     key,
     label: COMPARISON_PROMPTS[key].label,
+    kind: 'live',
     messages: [],
     steps: [],
     isLoading: false,

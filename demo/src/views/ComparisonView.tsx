@@ -11,6 +11,7 @@ import AgentFlow from '@/components/AgentFlow'
 
 // ---- Shared history types (kept here; App.tsx imports ComparisonHistoryEntry) ----
 export interface HistoryColumnData {
+  kind: 'history'
   key: string
   label: string
   toolCallCount: number
@@ -18,6 +19,8 @@ export interface HistoryColumnData {
   durationMs: number
   turnCount: number
   summary: string
+  /** Full agent step timeline (persisted so history can replay the flow) */
+  steps: import('@/engine/types').AgentStep[]
   error: string | null
 }
 
@@ -245,7 +248,7 @@ export function ComparisonView({
               key: col.key,
               label: col.label,
               error: col.error,
-              text: 'steps' in col
+              text: col.kind === 'live'
                 ? (col.steps.find((s) => s.type === 'response')?.content ?? '')
                 : col.summary,
             }))}
@@ -414,7 +417,7 @@ function ComparisonCard({
   }
   const getToolIcon = (name: string) => TOOL_ICON_MAP[name] ?? '🔧'
 
-  const isLive = 'steps' in data
+  const isLive = data.kind === 'live'
   const live = data as ComparisonColumnState
 
   const label = data.label
@@ -442,7 +445,8 @@ function ComparisonCard({
     ? (live.steps.find((s) => s.type === 'response')?.content ?? '').slice(0, 100)
     : data.summary.slice(0, 100)
 
-  const hasDetail = isLive && toolCallData.count > 0
+  const steps = isLive ? live.steps : []
+  const hasDetail = steps.length > 0
 
   const colorMap: Record<string, { dot: string; bg: string; border: string }> = {
     default: { dot: '🟢', bg: 'from-emerald-500/10 to-transparent', border: 'border-emerald-500/30' },
@@ -560,8 +564,8 @@ function ComparisonCard({
             </div>
             <div className="overflow-y-auto max-h-96 p-2">
               <AgentFlow
-                steps={isLive ? (data as ComparisonColumnState).steps : []}
-                currentStepIndex={isLive ? (data as ComparisonColumnState).steps.length - 1 : 0}
+                steps={steps}
+                currentStepIndex={steps.length - 1}
                 isLive
               />
             </div>
@@ -569,7 +573,7 @@ function ComparisonCard({
         )}
         {expanded && !hasDetail && (
           <div className="border-t border-slate-700/30 p-3 text-center text-xs text-slate-500">
-            历史记录仅保存摘要，不包含详细流程
+            该策略未产生可展示的流程
           </div>
         )}
       </div>

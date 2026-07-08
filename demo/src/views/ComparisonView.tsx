@@ -6,6 +6,7 @@
 
 import { useState } from 'react'
 import type { ComparisonColumnState, ComparisonVerdict } from '@/engine/comparisonAgent'
+import { COMPARISON_KEYS, COMPARISON_PROMPTS, type ComparisonKey } from '@/engine/comparisonAgent'
 import { Button } from '@/components/Button'
 import AgentFlow from '@/components/AgentFlow'
 
@@ -48,6 +49,9 @@ interface ComparisonViewProps {
   onHistorySelect: (e: ComparisonHistoryEntry) => void
   onHistoryDelete: (id: string) => void
   onHistoryRerun: (e: ComparisonHistoryEntry) => void
+  /** Which strategy columns are active (configurable) */
+  comparisonKeys: ComparisonKey[]
+  onKeysChange: (keys: ComparisonKey[]) => void
 }
 
 export function ComparisonView({
@@ -67,6 +71,8 @@ export function ComparisonView({
   onHistorySelect,
   onHistoryDelete,
   onHistoryRerun,
+  comparisonKeys,
+  onKeysChange,
 }: ComparisonViewProps) {
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -76,6 +82,38 @@ export function ComparisonView({
           <span className="text-xs font-semibold text-slate-400 whitespace-nowrap">
             📝 输入问题
           </span>
+          <div className="flex items-center gap-1">
+            {COMPARISON_KEYS.map((key) => {
+              const active = comparisonKeys.includes(key)
+              const toggle = () => {
+                if (comparisonState.isRunning) return
+                if (active) {
+                  if (comparisonKeys.length <= 2) return // keep at least 2
+                  onKeysChange(comparisonKeys.filter((k) => k !== key))
+                } else {
+                  onKeysChange([...comparisonKeys, key])
+                }
+              }
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={toggle}
+                  disabled={comparisonState.isRunning}
+                  title={COMPARISON_PROMPTS[key].label}
+                  className={[
+                    'px-2.5 py-1 text-xs rounded-full border transition-all duration-150',
+                    comparisonState.isRunning ? 'opacity-50 cursor-not-allowed' : '',
+                    active
+                      ? 'bg-blue-500/20 border-blue-500/50 text-blue-200'
+                      : 'bg-slate-800 border-slate-700/50 text-slate-500 hover:text-slate-300',
+                  ].join(' ')}
+                >
+                  {COMPARISON_PROMPTS[key].label}
+                </button>
+              )
+            })}
+          </div>
           <input
             type="text"
             value={comparisonDraft}

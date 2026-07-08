@@ -128,9 +128,9 @@ function createColumnState(key: ComparisonKey): ComparisonColumnState {
   }
 }
 
-export function createComparisonState(): ComparisonState {
+export function createComparisonState(keys: ComparisonKey[] = [...COMPARISON_KEYS]): ComparisonState {
   return {
-    columns: COMPARISON_KEYS.map(createColumnState),
+    columns: keys.map(createColumnState),
     isRunning: false,
     userMessage: '',
     verdict: null,
@@ -146,11 +146,12 @@ export interface ComparisonCallbacks {
 // ---- Agent ----
 
 export class ComparisonAgent {
-  private agents: LiveAgent[]
+  private agents: LiveAgent[] = []
   private callbacks: ComparisonCallbacks
   private state: ComparisonState
   private config: LLMConfig
   private stopped = false
+  private keys: ComparisonKey[]
 
   constructor(
     config: {
@@ -160,15 +161,24 @@ export class ComparisonAgent {
       maxTurns: number
     },
     callbacks: ComparisonCallbacks,
+    keys: ComparisonKey[] = [...COMPARISON_KEYS],
   ) {
     this.callbacks = callbacks
     this.config = { ...config }
-    this.state = createComparisonState()
-    // Create 3 LiveAgent instances, one per prompt
-    this.agents = COMPARISON_KEYS.map((key) => {
+    this.keys = keys.length ? keys : [...COMPARISON_KEYS]
+    this.state = createComparisonState(this.keys)
+    this.buildAgents()
+  }
+
+  /** (Re)build the LiveAgent instances for the active strategy keys */
+  private buildAgents(): void {
+    this.agents = this.keys.map((key) => {
       const agent = new LiveAgent(
         {
-          ...config,
+          apiKey: this.config.apiKey,
+          baseUrl: this.config.baseUrl,
+          model: this.config.model,
+          maxTurns: this.config.maxTurns ?? 10,
           systemPrompt: COMPARISON_PROMPTS[key].prompt,
         },
         {
@@ -186,7 +196,7 @@ export class ComparisonAgent {
   setConfig(config: { apiKey: string; baseUrl: string; model: string; maxTurns: number }): void {
     this.config = { ...config }
     for (let i = 0; i < this.agents.length; i++) {
-      const key = COMPARISON_KEYS[i]
+      const key = this.keys[i]
       this.agents[i].setConfig({
         ...config,
         systemPrompt: COMPARISON_PROMPTS[key].prompt,
@@ -203,7 +213,17 @@ export class ComparisonAgent {
     }
   }
 
-  /** Run all 3 agents in parallel with the same user message */
+  /** Change which strategy columns are compared (rebuilds agents) */
+  setActiveKeys(keys: ComparisonKey[]): void {
+    const next = keys.length ? keys : [...COMPARISON_KEYS]
+    if (next.join(',') === this.keys.join(',')) return
+    this.keys = next
+    this.buildAgents()
+    this.state = createComparisonState(this.keys)
+    this.emit()
+  }
+
+  /** Run all selected agents in parallel with the same user message */
   async run(userMessage: string): Promise<void> {
     if (this.state.isRunning) return
 
@@ -217,7 +237,7 @@ export class ComparisonAgent {
     // Reset state
     const now = Date.now()
     this.state = {
-      columns: COMPARISON_KEYS.map((key) => ({
+      columns: this.keys.map((key) => ({
         ...createColumnState(key),
         startTime: now,
       })),

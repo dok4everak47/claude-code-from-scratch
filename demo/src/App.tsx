@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AgentLoop, createInitialState } from '@/engine/agent'
 import { LiveAgent } from '@/engine/liveAgent'
-import { ComparisonAgent, createComparisonState } from '@/engine/comparisonAgent'
+import { ComparisonAgent, createComparisonState, type ComparisonKey } from '@/engine/comparisonAgent'
 import type { ComparisonState } from '@/engine/comparisonAgent'
 import { liveTools } from '@/engine/liveTools'
 import { scenarios } from '@/engine/scenarios'
@@ -87,6 +87,7 @@ export default function App() {
 
   // ---- Comparison mode state ----
   const [comparisonState, setComparisonState] = useState<ComparisonState>(createComparisonState())
+  const [comparisonKeys, setComparisonKeys] = useState<ComparisonKey[]>(['default', 'aggressive', 'conservative'])
   const comparisonAgentRef = useRef<ComparisonAgent | null>(null)
   const [comparisonDraft, setComparisonDraft] = useState('')
   const [comparisonSubMode, setComparisonSubMode] = useState<'summary' | 'detail'>('summary')
@@ -312,8 +313,9 @@ export default function App() {
     if (!text || comparisonState.isRunning) return
     setComparisonDraft('')
     setComparisonSubMode('detail')
+    comparisonAgentRef.current?.setActiveKeys(comparisonKeys)
     comparisonAgentRef.current?.run(text)
-  }, [comparisonDraft, comparisonState.isRunning])
+  }, [comparisonDraft, comparisonState.isRunning, comparisonKeys])
 
   const handleComparisonStop = useCallback(() => {
     comparisonAgentRef.current?.stop()
@@ -392,6 +394,7 @@ export default function App() {
     setViewingHistory(null)
     // Directly run - don't wait for state to flush
     setComparisonSubMode('detail')
+    comparisonAgentRef.current?.setActiveKeys(entry.columns.map((c) => c.key as ComparisonKey))
     comparisonAgentRef.current?.run(entry.userMessage)
   }, [])
 
@@ -680,6 +683,8 @@ export default function App() {
           onHistorySelect={handleHistorySelect}
           onHistoryDelete={handleHistoryDelete}
           onHistoryRerun={handleHistoryRerun}
+          comparisonKeys={comparisonKeys}
+          onKeysChange={setComparisonKeys}
         />
       )}
 

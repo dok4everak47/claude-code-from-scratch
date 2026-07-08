@@ -39,6 +39,12 @@ interface MultiAgentViewProps {
   onChangeConcurrency: (c: number) => void
   maxRunTurns: number
   onChangeMaxTurns: (t: number) => void
+  /** Fault injection: tool failure enabled */
+  faultToolFailure: boolean
+  /** Fault injection: max-turns crash enabled */
+  faultMaxTurnsCrash: boolean
+  /** Toggle a fault injection mode */
+  onToggleFault: (key: 'toolFailure' | 'maxTurnsCrash') => void
   costEstimate: CostEstimate
   usage: MultiAgentEngineState['usage']
   apiKey: string
@@ -83,6 +89,9 @@ export function MultiAgentView({
   onChangeConcurrency,
   maxRunTurns,
   onChangeMaxTurns,
+  faultToolFailure,
+  faultMaxTurnsCrash,
+  onToggleFault,
   costEstimate,
   usage,
   apiKey,
@@ -254,6 +263,37 @@ export function MultiAgentView({
                   onChange={(e) => onChangeMaxTurns(Math.max(1, Math.min(12, Number(e.target.value) || 1)))}
                   className="w-14 bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-violet-500 disabled:opacity-50"
                 />
+              </div>
+
+              {/* Fault injection (Safety Net playground) */}
+              <div className="inline-flex items-center gap-1">
+                <span className="text-[11px] text-slate-500">故障注入</span>
+                <button
+                  type="button"
+                  disabled={isOrchestrating}
+                  onClick={() => onToggleFault('toolFailure')}
+                  title="首次工具调用模拟失败，观察 Agent 安全网恢复"
+                  className={`px-2 py-1 text-[11px] rounded-full border transition-all duration-150 ${
+                    faultToolFailure
+                      ? 'bg-red-500/80 text-white border-red-500'
+                      : 'bg-slate-800 text-slate-500 border-slate-700 hover:border-slate-600'
+                  } disabled:opacity-50`}
+                >
+                  🔧 工具故障
+                </button>
+                <button
+                  type="button"
+                  disabled={isOrchestrating}
+                  onClick={() => onToggleFault('maxTurnsCrash')}
+                  title="强制轮次上限为 1，观察 Agent 碰到上限后优雅退出"
+                  className={`px-2 py-1 text-[11px] rounded-full border transition-all duration-150 ${
+                    faultMaxTurnsCrash
+                      ? 'bg-red-500/80 text-white border-red-500'
+                      : 'bg-slate-800 text-slate-500 border-slate-700 hover:border-slate-600'
+                  } disabled:opacity-50`}
+                >
+                  🔄 轮次耗尽
+                </button>
               </div>
 
               {/* Cost estimate (recomputed live) */}

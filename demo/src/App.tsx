@@ -106,6 +106,8 @@ export default function App() {
   const [concurrency, setConcurrency] = useState(0)
   const [maxRunTurns, setMaxRunTurns] = useState(4)
   const [topology, setTopology] = useState<Topology>('fan-out')
+  const [faultToolFailure, setFaultToolFailure] = useState(false)
+  const [faultMaxTurnsCrash, setFaultMaxTurnsCrash] = useState(false)
   const selectedScenarioRef = useRef<MultiAgentScenario | null>(null)
 
   // ---- Live run history (persisted to localStorage) ----
@@ -489,6 +491,10 @@ export default function App() {
       maxTurns: maxRunTurns,
       topology,
     })
+    orchestrationEngineRef.current?.setFaultConfig({
+      toolFailure: faultToolFailure,
+      forceMaxTurns: faultMaxTurnsCrash ? 1 : undefined,
+    })
     setIsOrchestrating(true)
     try {
       await orchestrationEngineRef.current?.run(cfg, liveTask)
@@ -553,6 +559,11 @@ export default function App() {
   const handleMultiAgentStop = useCallback(() => {
     orchestrationEngineRef.current?.stop()
     setIsOrchestrating(false)
+  }, [])
+
+  const handleToggleFault = useCallback((key: 'toolFailure' | 'maxTurnsCrash') => {
+    if (key === 'toolFailure') setFaultToolFailure((v) => !v)
+    else setFaultMaxTurnsCrash((v) => !v)
   }, [])
 
   /** Re-load the live roster with current expert/concurrency/turn/topology config. */
@@ -724,6 +735,9 @@ export default function App() {
           onChangeConcurrency={changeConcurrency}
           maxRunTurns={maxRunTurns}
           onChangeMaxTurns={changeMaxTurns}
+          faultToolFailure={faultToolFailure}
+          faultMaxTurnsCrash={faultMaxTurnsCrash}
+          onToggleFault={handleToggleFault}
           costEstimate={{
             promptTokens: runEstimate.promptTokens,
             completionTokens: runEstimate.completionTokens,

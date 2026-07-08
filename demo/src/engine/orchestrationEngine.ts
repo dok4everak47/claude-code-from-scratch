@@ -80,6 +80,14 @@ export interface OrchestrationOptions {
   topology?: Topology
 }
 
+/** Fault-injection configuration for the Safety Net playground. */
+export interface FaultConfig {
+  /** Inject a transient tool failure on the first tool call of each specialist. */
+  toolFailure?: boolean
+  /** Override maxTurns per worker (set low to simulate hitting the turn limit). */
+  forceMaxTurns?: number
+}
+
 export class OrchestrationEngine {
   private roster: MultiAgentScenario | null = null
   private liveScenario: MultiAgentScenario | null = null
@@ -110,6 +118,8 @@ export class OrchestrationEngine {
   private contextSeq = 0
   /** Model context window limit (tokens) — default 128K (DeepSeek) */
   private contextWindowLimit = 131072
+  /** Fault-injection config for the Safety Net playground */
+  private faultConfig: FaultConfig = {}
 
   constructor(cb: OrchestrationCallbacks) {
     this.onStateChange = cb.onStateChange
@@ -149,6 +159,11 @@ export class OrchestrationEngine {
     this.isRunning = false
     for (const n of this.activeNodes) this.statuses[n.id] = 'pending'
     this.emit()
+  }
+
+  /** Set fault-injection config (Safety Net playground) */
+  setFaultConfig(config: FaultConfig): void {
+    this.faultConfig = { ...config }
   }
 
   /** Run the real orchestration for a user task */
@@ -471,8 +486,8 @@ ${specList}
         config,
         systemPrompt,
         task: delegation.task,
-        tools: liveTools,
-        maxTurns: this.maxTurns,
+        tools: this.wrapToolsWithFault(liveTools, node.id, node.name),
+        maxTurns: this.faultConfig.forceMaxTurns ?? this.maxTurns,
         signal: this.abort?.signal,
         onUsage: (u) => this.recordUsage(node.id, u),
         onToolStart: (tc) => {
@@ -892,6 +907,37 @@ ${acc}`
       cumulativeTotal: this.usage.promptTokens + this.usage.completionTokens,
     })
     this.emit()
+  }
+
+  /**
+   * Wrap tools so the first call throws a simulated transient error.
+   * The agent loop's safety net catches the error, feeds it back to the
+   * LLM, and the LLM retries — demonstrating recovery.
+   */
+  private wrapToolsWithFault(tools: LiveToolDef[], agentId: string, agentName: string): LiveToolDef[] {
+    if (!this.faultConfig.toolFailure) return tools
+    let failed = false
+    return tools.map((t) => ({
+      ...t,
+      execute: async (args: Record<string, unknown>) => {
+        if (!failed) {
+          failed = true
+          this.record({
+            type: 'agent_fail',
+            agentId,
+            description: `⚠️ [故障注入] ${agentName} 调用 ${t.name} 失败（模拟：网络超时）`,
+          })
+          this.pushStep(agentId, {
+            id: uid('step'),
+            type: 'tool_call',
+            content: `${t.name} → ❌ 模拟故障：网络超时`,
+            timestamp: ts(),
+          })
+          throw new Error('模拟故障：工具执行超时（网络不可达），请重试或换用其他方式')
+        }
+        return t.execute(args)
+      },
+    }))
   }
 
   private pushStep(nodeId: string, step: AgentStep): void {

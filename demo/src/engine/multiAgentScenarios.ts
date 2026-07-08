@@ -13,6 +13,11 @@ export const codeReviewScenario: MultiAgentScenario = {
   id: 'code-review',
   name: '🔍 代码审查工作流',
   description: 'Coordinator 收到需求 → 委派 Developer 编码 → Reviewer 审查 → 发现问题 → Developer 修改 → Reviewer 通过',
+  /** DAG: developer → reviewer (sequential dependency) */
+  graph: {
+    developer: [],
+    reviewer: ['developer'],
+  },
   nodes: [
     {
       id: 'coordinator',
@@ -633,6 +638,12 @@ export const researchScenario: MultiAgentScenario = {
   id: 'research',
   name: '📚 研究报告工作流',
   description: 'Coordinator 拆解主题 → Searcher 搜资料 + Summarizer 写摘要 → Writer 写报告 → Coordinator 审核输出',
+  /** DAG: searcher ∥ summarizer → writer (parallel branches converge) */
+  graph: {
+    searcher: [],
+    summarizer: [],
+    writer: ['searcher', 'summarizer'],
+  },
   nodes: [
     {
       id: 'coordinator',

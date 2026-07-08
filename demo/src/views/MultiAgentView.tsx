@@ -186,11 +186,12 @@ export function MultiAgentView({
               {/* Topology selector */}
               <div className="inline-flex items-center gap-1">
                 <span className="text-[11px] text-slate-500">拓扑</span>
-                {(['fan-out', 'debate', 'pipeline'] as Topology[]).map((t) => {
+                {(['fan-out', 'debate', 'pipeline', 'dag'] as Topology[]).map((t) => {
                   const labels: Record<Topology, string> = {
                     'fan-out': '扇出',
                     debate: '辩论',
                     pipeline: '流水线',
+                    dag: 'DAG',
                   }
                   const disabled = t === 'debate' && liveSpecialists.length < 2
                   const on = topology === t
@@ -413,7 +414,7 @@ export function MultiAgentView({
           <div className="flex-1 min-w-0 rounded-xl border border-slate-700 bg-slate-900/50 p-3">
             <div className="flex items-center gap-2 mb-2">
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">
-                {r.topology === 'fan-out' ? '扇出' : r.topology === 'debate' ? '辩论' : '流水线'}
+                {r.topology === 'fan-out' ? '扇出' : r.topology === 'debate' ? '辩论' : r.topology === 'dag' ? 'DAG' : '流水线'}
               </span>
               <span className="text-xs font-semibold text-slate-100 truncate">{r.scenarioName}</span>
             </div>

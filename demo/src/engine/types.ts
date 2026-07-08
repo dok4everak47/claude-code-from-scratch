@@ -203,6 +203,12 @@ export interface MultiAgentScenario {
   description: string
   nodes: AgentNode[]
   timeline: MultiAgentEvent[]
+  /**
+   * Optional DAG: maps a specialist nodeId to the list of dependency
+   * nodeIds that must complete before it runs. Used by the 'dag' topology.
+   * Omit or empty => no inter-specialist dependencies (all run in parallel).
+   */
+  graph?: Record<string, string[]>
 }
 
 /** A single event in the multi-agent timeline */

@@ -67,7 +67,7 @@ export interface OrchestrationCallbacks {
 }
 
 /** Orchestration topology for a live run. */
-export type Topology = 'fan-out' | 'debate' | 'pipeline'
+export type Topology = 'fan-out' | 'debate' | 'pipeline' | 'dag'
 
 export interface OrchestrationOptions {
   /** Only these specialist ids participate. Omit => all specialists. */
@@ -201,6 +201,8 @@ export class OrchestrationEngine {
         await this.runDebate(config, coordinator, specialists, task)
       } else if (this.topology === 'pipeline') {
         await this.runPipeline(config, coordinator, specialists, task)
+      } else if (this.topology === 'dag') {
+        await this.runDag(config, coordinator, specialists, task)
       } else {
         await this.runFanOut(config, coordinator, specialists, task)
       }
@@ -674,7 +676,13 @@ ${resultText}
   // ============================================================
 
   private topologyName(): string {
-    return this.topology === 'debate' ? '辩论模式' : this.topology === 'pipeline' ? '流水线模式' : '扇出模式'
+    return this.topology === 'debate'
+      ? '辩论模式'
+      : this.topology === 'pipeline'
+        ? '流水线模式'
+        : this.topology === 'dag'
+          ? 'DAG 拓扑模式'
+          : '扇出模式'
   }
 
   private async runDebate(
@@ -852,6 +860,116 @@ ${acc}`
         acc += `\n【${sp.name}】\n${out.content}\n`
       }
     }
+    await this.runCoordinatorFinal(config, coordinator, task, results)
+  }
+
+  // ============================================================
+  // Internal: DAG topology (dependency-graph-driven execution)
+  // ============================================================
+
+  private async runDag(
+    config: LLMConfig,
+    coordinator: AgentNode,
+    specialists: AgentNode[],
+    task: string,
+  ): Promise<void> {
+    if (specialists.length === 0) {
+      await this.runCoordinatorFinal(config, coordinator, task, [])
+      return
+    }
+
+    const graph = this.roster?.graph ?? {}
+    // Build dependency sets (only among specialists; coordinator is the root/sink)
+    const deps = new Map<string, string[]>()
+    for (const sp of specialists) {
+      const raw = graph[sp.id] ?? []
+      deps.set(
+        sp.id,
+        raw.filter((d) => specialists.some((s) => s.id === d)),
+      )
+    }
+
+    const completed = new Set<string>()
+    const results: { agentId: string; content: string }[] = []
+    let wave = 0
+
+    this.record({
+      type: 'agent_status_change',
+      agentId: coordinator.id,
+      data: { status: 'thinking' },
+      description: `${coordinator.name} 按 DAG 依赖图调度（${specialists.length} 个专家）`,
+    })
+
+    while (completed.size < specialists.length) {
+      // Find specialists whose deps are all satisfied
+      const ready = specialists.filter(
+        (sp) =>
+          !completed.has(sp.id) &&
+          (deps.get(sp.id) ?? []).every((d) => completed.has(d)),
+      )
+
+      if (ready.length === 0) {
+        this.record({
+          type: 'agent_fail',
+          agentId: coordinator.id,
+          description: '⚠️ DAG 死锁：检测到循环依赖或无法满足的依赖',
+        })
+        break
+      }
+
+      wave++
+      const readyNames = ready.map((s) => s.name).join(', ')
+      this.record({
+        type: 'agent_status_change',
+        agentId: coordinator.id,
+        data: { status: 'thinking' },
+        description: `DAG 第 ${wave} 波：${readyNames} 开始（依赖已满足）`,
+      })
+
+      const waveResults = await mapWithConcurrency(
+        ready,
+        this.concurrency,
+        async (sp) => {
+          // Inject dependency outputs into the task
+          const depIds = deps.get(sp.id) ?? []
+          const depResults = depIds
+            .map((d) => {
+              const r = results.find((x) => x.agentId === d)
+              const n = this.roster?.nodes.find((x) => x.id === d)
+              return r ? `【${n?.name ?? d}】\n${r.content}` : null
+            })
+            .filter(Boolean)
+
+          const taskWithDeps =
+            depResults.length > 0
+              ? `${task}\n\n——前序依赖产出（请在其基础上继续）——\n${depResults.join('\n\n')}`
+              : task
+
+          const out = await this.runWorker(config, coordinator, {
+            agentId: sp.id,
+            task: taskWithDeps,
+          })
+          if (out) {
+            results.push(out)
+            completed.add(sp.id)
+          }
+          return out
+        },
+      )
+
+      // Mark any that didn't produce output as completed to avoid deadlock
+      for (let i = 0; i < ready.length; i++) {
+        if (!waveResults[i]) completed.add(ready[i].id)
+      }
+    }
+
+    this.record({
+      type: 'agent_status_change',
+      agentId: coordinator.id,
+      data: { status: 'thinking' },
+      description: `DAG 全部 ${wave} 波完成，开始整合结果`,
+    })
+
     await this.runCoordinatorFinal(config, coordinator, task, results)
   }
 

@@ -18,6 +18,7 @@ const TOPOLOGY_LABEL: Record<SavedRun['topology'], string> = {
   'fan-out': '扇出',
   debate: '辩论',
   pipeline: '流水线',
+  dag: 'DAG',
 }
 
 export default function RunHistoryPanel({
